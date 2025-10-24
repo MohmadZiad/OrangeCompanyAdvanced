@@ -73,16 +73,18 @@ export function ProRataCalculator() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-12">
+    <div className="grid gap-8 lg:grid-cols-12" data-reveal>
       {/* Inputs */}
-      <Card className="lg:col-span-5">
+      <Card className="lg:col-span-5 border-white/60 bg-white/70 dark:bg-white/10">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Receipt className="h-5 w-5 text-primary" />
+          <CardTitle className="flex items-center gap-3 text-lg">
+            <span className="flex h-12 w-12 items-center justify-center rounded-3xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_22px_48px_-30px_rgba(255,90,0,0.75)]">
+              <Receipt className="h-5 w-5" />
+            </span>
             {L ? "المدخلات" : "Inputs"}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {/* Activation */}
           <div className="space-y-2">
             <Label htmlFor="activation" className="flex items-center gap-2">
@@ -98,11 +100,11 @@ export function ProRataCalculator() {
           </div>
 
           {/* Mode */}
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Button
               type="button"
               variant={mode === "gross" ? "default" : "outline"}
-              className="flex-1 hover-elevate active-elevate-2"
+              className="flex-1"
               onClick={() => setMode("gross")}
             >
               {L ? "فاتورة كاملة (شامل الضريبة)" : "Full Invoice (with VAT)"}
@@ -110,7 +112,7 @@ export function ProRataCalculator() {
             <Button
               type="button"
               variant={mode === "monthly" ? "default" : "outline"}
-              className="flex-1 hover-elevate active-elevate-2"
+              className="flex-1"
               onClick={() => setMode("monthly")}
             >
               {L ? "اشتراك شهري (صافي)" : "Monthly (net)"}
@@ -165,19 +167,21 @@ export function ProRataCalculator() {
       </Card>
 
       {/* Results */}
-      <Card className="lg:col-span-7">
+      <Card className="lg:col-span-7 border-white/60 bg-white/70 dark:bg-white/10">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Percent className="h-5 w-5 text-primary" />
+          <CardTitle className="flex items-center gap-3 text-lg">
+            <span className="flex h-12 w-12 items-center justify-center rounded-3xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_22px_48px_-30px_rgba(255,90,0,0.75)]">
+              <Percent className="h-5 w-5" />
+            </span>
             {L ? "النتائج" : "Results"}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {result ? (
             <>
               {/* KPIs */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="rounded-xl bg-muted p-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-inner backdrop-blur dark:bg-white/5">
                   <div className="text-xs text-muted-foreground">
                     {L ? "الفترة" : "Period"}
                   </div>
@@ -185,7 +189,7 @@ export function ProRataCalculator() {
                     {result.cycleRangeText}
                   </div>
                 </div>
-                <div className="rounded-xl bg-muted p-4">
+                <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-inner backdrop-blur dark:bg-white/5">
                   <div className="text-xs text-muted-foreground">
                     {L ? "أيام البروراتا/الدورة" : "Pro-days / Cycle"}
                   </div>
@@ -193,7 +197,7 @@ export function ProRataCalculator() {
                     {result.proDaysText}
                   </div>
                 </div>
-                <div className="rounded-xl bg-muted p-4">
+                <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-inner backdrop-blur dark:bg-white/5">
                   <div className="text-xs text-muted-foreground">
                     {L ? "النسبة %" : "Percent"}
                   </div>
@@ -201,7 +205,7 @@ export function ProRataCalculator() {
                     {result.pctText}
                   </div>
                 </div>
-                <div className="rounded-xl bg-muted p-4">
+                <div className="rounded-3xl border border-white/50 bg-white/70 p-4 shadow-inner backdrop-blur dark:bg-white/5">
                   <div className="text-xs text-muted-foreground">
                     {L ? "الاشتراك الشهري" : "Monthly (net)"}
                   </div>
@@ -212,8 +216,8 @@ export function ProRataCalculator() {
               </div>
 
               {/* Values */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-xl border p-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="rounded-3xl border border-white/60 bg-white/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur dark:bg-white/10">
                   <div className="text-xs text-muted-foreground">
                     {L ? "قيمة البروراتا" : "Pro-rata (net)"}
                   </div>
@@ -221,7 +225,7 @@ export function ProRataCalculator() {
                     {result.prorataNetText}
                   </div>
                 </div>
-                <div className="rounded-xl border p-4">
+                <div className="rounded-3xl border border-white/60 bg-white/80 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur dark:bg-white/10">
                   <div className="text-xs text-muted-foreground">
                     {L ? "تاريخ إصدار الفاتورة" : "Invoice Issue Date"}
                   </div>
@@ -232,8 +236,8 @@ export function ProRataCalculator() {
               </div>
 
               {/* Script (old style) */}
-              <div className="rounded-xl border p-4">
-                <div className="flex items-center justify-between mb-2">
+              <div className="rounded-3xl border border-white/60 bg-white/80 p-5 shadow-[0_22px_48px_-32px_rgba(255,90,0,0.35)] backdrop-blur dark:bg-white/10">
+                <div className="mb-2 flex items-center justify-between">
                   <div className="text-sm font-medium">
                     {L ? "السكربت" : "Script"}
                   </div>
@@ -253,7 +257,7 @@ export function ProRataCalculator() {
               </div>
             </>
           ) : (
-            <div className="text-center py-10 text-muted-foreground">
+            <div className="rounded-3xl border border-dashed border-white/60 bg-white/50 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
               {L
                 ? "أدخل تاريخ التفعيل والمبلغ لعرض النتائج"
                 : "Enter activation date and amount to see results."}

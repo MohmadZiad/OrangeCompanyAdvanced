@@ -23,19 +23,23 @@ export function ResultCard({ title, value, formula, index = 0 }: ResultCardProps
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
+      transition={{ delay: index * 0.08, type: "spring", stiffness: 120, damping: 16 }}
+      whileHover={{ y: -6, scale: 1.01 }}
     >
-      <Card className="hover-elevate transition-all duration-200" data-testid={`result-card-${title.toLowerCase().replace(/\s+/g, '-')}`}>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
+      <Card
+        className="hover-elevate transition-all duration-300 border-transparent bg-gradient-to-br from-white/40 via-white/55 to-white/25 dark:from-white/10 dark:via-white/5 dark:to-white/10"
+        data-testid={`result-card-${title.toLowerCase().replace(/\s+/g, '-')}`}
+      >
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+          <CardTitle className="text-sm font-medium flex items-center gap-2 underline-animate">
             {title}
             {formula && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    className="text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-full"
                     aria-label="Show formula"
                     data-testid={`tooltip-trigger-${title.toLowerCase().replace(/\s+/g, '-')}`}
                   >
@@ -50,8 +54,11 @@ export function ResultCard({ title, value, formula, index = 0 }: ResultCardProps
           </CardTitle>
           <CopyButton text={value.toString()} variant="ghost" size="icon" />
         </CardHeader>
-        <CardContent>
-          <div className="text-3xl font-bold font-mono tabular-nums" data-testid={`text-result-${title.toLowerCase().replace(/\s+/g, '-')}`}>
+        <CardContent className="pt-2">
+          <div
+            className="text-3xl font-bold font-mono tabular-nums drop-shadow-sm"
+            data-testid={`text-result-${title.toLowerCase().replace(/\s+/g, '-')}`}
+          >
             {formattedValue}
           </div>
         </CardContent>
