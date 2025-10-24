@@ -7,7 +7,7 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { Chatbot } from "@/components/Chatbot";
 import { OrangeCalculator } from "@/components/OrangeCalculator";
 import { ProRataCalculator } from "@/components/ProRataCalculator";
-import { SummaryPanel } from "@/components/SummaryPanel";
+import { SummaryPanel, SummaryPanelMobile } from "@/components/SummaryPanel";
 import { Button } from "@/components/ui/button";
 import { MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
@@ -125,7 +125,7 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="container relative z-10 flex-1 px-4 py-12 sm:px-6">
+      <main className="container relative z-10 flex-1 px-4 py-10 sm:px-6 sm:py-12">
         <div className="grid gap-8 lg:grid-cols-[1.618fr_minmax(0,1fr)] xl:grid-cols-[1.75fr_minmax(0,1fr)]">
           {/* Main Content Area */}
           <div data-reveal>
@@ -187,6 +187,9 @@ export default function Home() {
                 </motion.div>
               </TabsContent>
             </Tabs>
+            <div className="mt-8 lg:hidden" data-reveal>
+              <SummaryPanelMobile />
+            </div>
           </div>
 
           {/* Summary Panel (Desktop only) */}

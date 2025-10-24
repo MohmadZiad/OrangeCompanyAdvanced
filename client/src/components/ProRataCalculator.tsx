@@ -6,7 +6,7 @@
 // - Results: KPIs + script (AR/EN) identical to the old app style.
 // ---------------------------------------------------------------------------
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,7 @@ import { computeProrata, buildScript, ymd } from "@/lib/proRata";
 type Mode = "gross" | "monthly";
 
 export function ProRataCalculator() {
-  const { locale } = useAppStore();
+  const { locale, setProRataResult } = useAppStore();
   const L = locale === "ar";
 
   // UI state
@@ -62,6 +62,15 @@ export function ProRataCalculator() {
     if (!result) return "";
     return buildScript(result, L ? "ar" : "en");
   }, [result, L]);
+
+  useEffect(() => {
+    setProRataResult(result);
+    return () => {
+      if (result) {
+        setProRataResult(null);
+      }
+    };
+  }, [result, setProRataResult]);
 
   const copyText = async () => {
     try {

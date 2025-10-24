@@ -1,5 +1,5 @@
 // client/src/components/Chatbot.tsx
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -17,6 +17,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
+import { SmartLinkPill } from "@/components/SmartLinkPill";
+import {
+  getSmartLinkCandidates,
+  listSmartLinks,
+  type SmartLinkId,
+} from "@/lib/smartLinks";
 
 export function Chatbot() {
   const [message, setMessage] = useState("");
@@ -26,6 +32,27 @@ export function Chatbot() {
 
   const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
     useAppStore();
+
+  const recommendedSmartLinks = useMemo(() => {
+    const latestInput = message.trim()
+      ? message
+      : [...chatMessages]
+          .reverse()
+          .find((msg) => msg.role === "user" && msg.content.trim())?.content ??
+        "";
+
+    const matches = latestInput
+      ? getSmartLinkCandidates(latestInput).map((link) => link.id)
+      : [];
+
+    if (matches.length > 0) {
+      return Array.from(new Set(matches)).slice(0, 3);
+    }
+
+    return listSmartLinks()
+      .map((link) => link.id)
+      .slice(0, 3);
+  }, [chatMessages, message]);
 
   // autoscroll
   useEffect(() => {
@@ -90,8 +117,9 @@ export function Chatbot() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
+      let streamDone = false;
 
-      while (true) {
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -103,7 +131,7 @@ export function Chatbot() {
           const data = line.slice(6).trim();
           if (!data) continue;
           if (data === "[DONE]") {
-            // خلصنا
+            streamDone = true;
             break;
           }
           try {
@@ -229,7 +257,7 @@ export function Chatbot() {
                 <ScrollArea className="h-full p-5" ref={scrollRef}>
                   <div className="space-y-4">
                     {chatMessages.length === 0 && (
-                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
+                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg白/5 dark:bg-white/5">
                         <MessageSquare className="mx-auto mb-4 h-12 w-12 opacity-70" />
                         <p className="text-sm">
                           {t("chatPlaceholder", locale)}
@@ -265,9 +293,30 @@ export function Chatbot() {
                             )}
                             data-testid={`chat-message-${msg.role}`}
                           >
-                            <p className="whitespace-pre-wrap break-words text-sm leading-6">
-                              {msg.content}
-                            </p>
+                            <div className="space-y-2 text-sm leading-6">
+                              {parseMessageSegments(msg.content).map(
+                                (segment, index) =>
+                                  segment.type === "link" ? (
+                                    <SmartLinkPill
+                                      key={`${msg.id}-link-${index}`}
+                                      linkId={segment.linkId}
+                                      className={cn(
+                                        "inline-flex",
+                                        msg.role === "user" &&
+                                          "bg-white/90 text-foreground"
+                                      )}
+                                    />
+                                  ) : (
+                                    <span
+                                      key={`${msg.id}-text-${index}`}
+                                      className="block whitespace-pre-wrap break-words"
+                                    >
+                                      {segment.content}
+                                    </span>
+                                  )
+                              )}
+                            </div>
+
                             <span className="mt-2 block text-xs opacity-70">
                               {new Date(msg.timestamp).toLocaleTimeString(
                                 locale === "ar" ? "ar-JO" : "en-US",
@@ -320,6 +369,21 @@ export function Chatbot() {
                   </div>
                 )}
 
+                {recommendedSmartLinks.length > 0 && (
+                  <div className="w-full">
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {locale === "ar"
+                        ? "روابط أورنج الرسمية"
+                        : "Official Orange links"}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {recommendedSmartLinks.map((linkId) => (
+                        <SmartLinkPill key={linkId} linkId={linkId} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Input */}
                 <form
                   onSubmit={(e) => {
@@ -352,4 +416,37 @@ export function Chatbot() {
       </AnimatePresence>
     </>
   );
+}
+
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "link"; linkId: SmartLinkId };
+
+function parseMessageSegments(content: string): MessageSegment[] {
+  const regex = /\[\[link:([a-z0-9-]+)\]\]/gi;
+  const segments: MessageSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({
+        type: "text",
+        content: content.slice(lastIndex, match.index),
+      });
+    }
+    const linkId = match[1]?.toLowerCase() as SmartLinkId;
+    segments.push({ type: "link", linkId });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", content: content.slice(lastIndex) });
+  }
+
+  if (segments.length === 0) {
+    return [{ type: "text", content }];
+  }
+
+  return segments;
 }

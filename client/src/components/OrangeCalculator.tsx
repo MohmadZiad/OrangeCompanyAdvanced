@@ -20,7 +20,7 @@ import type { CalculatorResults } from "@shared/schema";
 export function OrangeCalculator() {
   const [basePrice, setBasePrice] = useState<string>("");
   const [results, setResults] = useState<CalculatorResults | null>(null);
-  const { locale } = useAppStore();
+  const { locale, setCalculatorResults } = useAppStore();
 
   // Append keypad digits (keep single dot)
   const handleNumberClick = (num: string) => {
@@ -58,13 +58,16 @@ export function OrangeCalculator() {
           dataOnly: out.dataOnly,
         };
         setResults(result);
+        setCalculatorResults(result);
       } catch {
         setResults(null);
+        setCalculatorResults(null);
       }
     } else {
       setResults(null);
+      setCalculatorResults(null);
     }
-  }, [basePrice]);
+  }, [basePrice, setCalculatorResults]);
 
   return (
     <div className="space-y-8">
