@@ -7,10 +7,11 @@ import { LanguageToggle } from "@/components/LanguageToggle";
 import { Chatbot } from "@/components/Chatbot";
 import { OrangeCalculator } from "@/components/OrangeCalculator";
 import { ProRataCalculator } from "@/components/ProRataCalculator";
-import { SummaryPanel } from "@/components/SummaryPanel";
+import { SummaryPanel, SummaryPanelMobile } from "@/components/SummaryPanel";
 import { Button } from "@/components/ui/button";
 import { MessageSquare } from "lucide-react";
 import { motion } from "framer-motion";
+import { AssistantHint } from "@/components/AssistantHint";
 
 export default function Home() {
   const { theme, setTheme, locale, setLocale, activeTab, setActiveTab, setChatOpen } = useAppStore();
@@ -61,26 +62,46 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="relative z-10 flex min-h-screen flex-col">
       {/* App Bar */}
-      <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between px-4 sm:px-6">
+      <header className="sticky top-0 z-40 w-full border-b border-white/50 bg-white/65 shadow-[0_18px_48px_-32px_rgba(255,90,0,0.55)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 dark:bg-black/40 dark:border-white/10">
+        <div className="container flex h-20 items-center justify-between px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3"
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center gap-4"
           >
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary text-primary-foreground font-bold text-lg">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-xl font-bold text-white shadow-[0_20px_40px_-30px_rgba(255,90,0,0.85)]">
               O
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-app-title">
-              {t("appTitle", locale)}
-            </h1>
+            <div>
+              <motion.h1
+                className="text-2xl font-semibold sm:text-3xl"
+                data-testid="text-app-title"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2, duration: 0.6, ease: "easeOut" }}
+              >
+                {t("appTitle", locale)}
+              </motion.h1>
+              <motion.p
+                className="text-sm text-muted-foreground"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.32, duration: 0.6, ease: "easeOut" }}
+              >
+                {locale === "ar"
+                  ? "منصة ذكية لحسابات دقيقة وتجربة فاخرة"
+                  : "Premium calculators & assistance for faster, sharper decisions."}
+              </motion.p>
+            </div>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             className="flex items-center gap-2"
           >
             <Button
@@ -104,12 +125,12 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="container px-4 sm:px-6 py-8">
-        <div className="grid gap-6 lg:grid-cols-12">
+      <main className="container relative z-10 flex-1 px-4 py-10 sm:px-6 sm:py-12">
+        <div className="grid gap-8 lg:grid-cols-[1.618fr_minmax(0,1fr)] xl:grid-cols-[1.75fr_minmax(0,1fr)]">
           {/* Main Content Area */}
-          <div className="lg:col-span-8 xl:col-span-9">
-            <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mb-8" data-testid="tabs-main">
+          <div data-reveal>
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-8">
+              <TabsList className="grid w-full grid-cols-3" data-testid="tabs-main">
                 <TabsTrigger value="calculator" data-testid="tab-calculator">
                   {t("calculator", locale)}
                 </TabsTrigger>
@@ -121,7 +142,7 @@ export default function Home() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="calculator" className="mt-0">
+              <TabsContent value="calculator" className="mt-0" data-reveal>
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -131,7 +152,7 @@ export default function Home() {
                 </motion.div>
               </TabsContent>
 
-              <TabsContent value="pro-rata" className="mt-0">
+              <TabsContent value="pro-rata" className="mt-0" data-reveal>
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -141,7 +162,7 @@ export default function Home() {
                 </motion.div>
               </TabsContent>
 
-              <TabsContent value="assistant" className="mt-0">
+              <TabsContent value="assistant" className="mt-0" data-reveal>
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -166,10 +187,13 @@ export default function Home() {
                 </motion.div>
               </TabsContent>
             </Tabs>
+            <div className="mt-8 lg:hidden" data-reveal>
+              <SummaryPanelMobile />
+            </div>
           </div>
 
           {/* Summary Panel (Desktop only) */}
-          <aside className="hidden lg:block lg:col-span-4 xl:col-span-3">
+          <aside className="hidden lg:block" data-reveal>
             <SummaryPanel />
           </aside>
         </div>
@@ -177,6 +201,7 @@ export default function Home() {
 
       {/* Chatbot */}
       <Chatbot />
+      <AssistantHint />
     </div>
   );
 }

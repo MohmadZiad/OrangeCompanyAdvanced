@@ -43,7 +43,7 @@ export interface ProrataOutput {
   prorataNetText: string; // "JD 7.000"
   monthlyNetText: string; // "JD 15.000"
   cycleRangeText: string; // "2025-09-15 → 2025-10-15"
-  proDaysText: string; // "14 / 30"
+  proDaysText: string; // "14 / 15"
 
   // optional echo (if user gave gross)
   fullInvoiceGross?: number;
@@ -90,7 +90,9 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
 
   const act = toUTC(input.activationDate);
   const end = firstAnchorAfter(act, anchorDay);
-  const { startUTC, cycleDays } = cycleFromAnchor(end, anchorDay);
+
+  const cycleDays = 15;
+  const startUTC = new Date(end.getTime() - cycleDays * DAY);
 
   const used = Math.max(0, Math.round((end.getTime() - act.getTime()) / DAY));
   const proDays = Math.min(used, cycleDays);
@@ -103,7 +105,7 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
 
   const prorataNet = monthlyNet * ratio;
 
-  const nextEnd = firstAnchorAfter(end, anchorDay);
+  const nextEnd = new Date(end.getTime() + cycleDays * DAY);
 
   return {
     cycleDays,

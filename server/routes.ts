@@ -3,6 +3,12 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { openai, SYSTEM_PROMPT } from "./openai";
 import { chatRequestSchema } from "@shared/schema";
+import { SMART_LINKS } from "@shared/smartLinks";
+import {
+  buildKnowledgePrompt,
+  retrieveKnowledge,
+  KNOWLEDGE,
+} from "./skk/knowledge";
 
 // Rate limiting (ذاكرة مؤقتة بسيطة)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -49,6 +55,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { messages } = parsed.data;
 
+      const latestUserMessage = [...messages]
+        .reverse()
+        .find((msg) => msg.role === "user" && msg.content.trim());
+
+      const knowledgeMatches = latestUserMessage
+        ? retrieveKnowledge(latestUserMessage.content)
+        : [];
+
+      const fallbackKnowledge = knowledgeMatches.length
+        ? knowledgeMatches
+        : KNOWLEDGE.slice(0, 2);
+
+      const knowledgePrompt = buildKnowledgePrompt(fallbackKnowledge);
+
+      const linkDirectory = Object.values(SMART_LINKS)
+        .map(
+          (link) =>
+            `${link.id}: ${link.label.en} → ${link.description.en} (emit [[link:${link.id}]])`
+        )
+        .join("\n");
+
       // SSE headers
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
@@ -63,15 +90,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // استدعاء OpenAI مع البث
       // ملاحظة: حسب طلبك، نستخدم gpt-5 ولا نغيره
+      const composedMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        { role: "system", content: SYSTEM_PROMPT },
+      ];
+
+      if (knowledgePrompt) {
+        composedMessages.push({ role: "system", content: knowledgePrompt });
+      }
+
+      composedMessages.push({
+        role: "system",
+        content: `When recommending official Orange resources, respond with tokens like [[link:plans-overview]]. Available link tokens are:\n${linkDirectory}`,
+      });
+
+      composedMessages.push(
+        ...messages.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }))
+      );
+
       const stream = await openai.chat.completions.create({
         model: "gpt-5",
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          ...messages.map((m) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })),
-        ],
+        messages: composedMessages,
         max_completion_tokens: 2048,
         stream: true,
       });

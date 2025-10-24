@@ -1,5 +1,5 @@
 // client/src/components/Chatbot.tsx
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -12,11 +12,17 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppStore } from "@/lib/store";
 import { t, quickReplies } from "@/lib/i18n";
-import { MessageSquare, Send, X, Loader2 } from "lucide-react";
+import { MessageSquare, Send, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
+import { SmartLinkPill } from "@/components/SmartLinkPill";
+import {
+  getSmartLinkCandidates,
+  listSmartLinks,
+  type SmartLinkId,
+} from "@/lib/smartLinks";
 
 export function Chatbot() {
   const [message, setMessage] = useState("");
@@ -26,6 +32,27 @@ export function Chatbot() {
 
   const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
     useAppStore();
+
+  const recommendedSmartLinks = useMemo(() => {
+    const latestInput = message.trim()
+      ? message
+      : [...chatMessages]
+          .reverse()
+          .find((msg) => msg.role === "user" && msg.content.trim())?.content ??
+        "";
+
+    const matches = latestInput
+      ? getSmartLinkCandidates(latestInput).map((link) => link.id)
+      : [];
+
+    if (matches.length > 0) {
+      return Array.from(new Set(matches)).slice(0, 3);
+    }
+
+    return listSmartLinks()
+      .map((link) => link.id)
+      .slice(0, 3);
+  }, [chatMessages, message]);
 
   // autoscroll
   useEffect(() => {
@@ -176,7 +203,7 @@ export function Chatbot() {
             <Button
               size="icon"
               onClick={() => setChatOpen(true)}
-              className="h-14 w-14 rounded-full shadow-lg hover-elevate active-elevate-2"
+              className="h-16 w-16 rounded-full bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] shadow-[0_28px_60px_-28px_rgba(255,90,0,0.75)] hover:-translate-y-1"
               data-testid="button-open-chat"
               aria-label={t("help", locale)}
             >
@@ -200,16 +227,18 @@ export function Chatbot() {
             exit={{ x: locale === "ar" ? -400 : 400, opacity: 0 }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
             className={cn(
-              "fixed top-0 bottom-0 w-full sm:w-[400px] z-50 shadow-2xl",
+              "fixed top-0 bottom-0 z-50 w-full sm:w-[420px] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
               locale === "ar" ? "left-0" : "right-0"
             )}
             style={{ direction: locale === "ar" ? "rtl" : "ltr" }}
             data-testid="chat-panel"
           >
-            <Card className="h-full flex flex-col rounded-none sm:rounded-l-2xl border-0 sm:border">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5 text-primary" />
+            <Card className="flex h-full flex-col rounded-none border-0 bg-white/75 backdrop-blur-2xl sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-white/50 pb-4 dark:border-white/10">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white">
+                    <MessageSquare className="h-5 w-5" />
+                  </span>
                   {t("chatTitle", locale)}
                 </CardTitle>
                 <Button
@@ -224,48 +253,78 @@ export function Chatbot() {
               </CardHeader>
 
               <CardContent className="flex-1 overflow-hidden p-0">
-                <ScrollArea className="h-full p-4" ref={scrollRef}>
+                <ScrollArea className="h-full p-5" ref={scrollRef}>
                   <div className="space-y-4">
                     {chatMessages.length === 0 && (
-                      <div className="text-center text-muted-foreground py-8">
-                        <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
+                        <MessageSquare className="mx-auto mb-4 h-12 w-12 opacity-70" />
                         <p className="text-sm">
                           {t("chatPlaceholder", locale)}
                         </p>
                       </div>
                     )}
 
-                    {chatMessages.map((msg) => (
-                      <motion.div
-                        key={msg.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className={cn(
-                          "flex",
-                          msg.role === "user" ? "justify-end" : "justify-start"
-                        )}
-                      >
-                        <div
+                    {chatMessages.map((msg) => {
+                      const isErrorMessage =
+                        msg.role === "assistant" &&
+                        /عذرًا|sorry/i.test(msg.content);
+                      const isSuccessMessage =
+                        msg.role === "assistant" && !isErrorMessage;
+
+                      return (
+                        <motion.div
+                          key={msg.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
                           className={cn(
-                            "max-w-[85%] rounded-2xl px-4 py-2",
-                            msg.role === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-foreground"
+                            "flex",
+                            msg.role === "user" ? "justify-end" : "justify-start"
                           )}
-                          data-testid={`chat-message-${msg.role}`}
                         >
-                          <p className="text-sm whitespace-pre-wrap break-words">
-                            {msg.content}
-                          </p>
-                          <span className="text-xs opacity-70 mt-1 block">
-                            {new Date(msg.timestamp).toLocaleTimeString(
-                              locale === "ar" ? "ar-JO" : "en-US",
-                              { hour: "2-digit", minute: "2-digit" }
+                          <div
+                            className={cn(
+                              "max-w-[85%] rounded-3xl px-4 py-3 shadow-sm backdrop-blur",
+                              msg.role === "user"
+                                ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
+                                : "bg-white/80 text-foreground dark:bg-white/10",
+                              isErrorMessage && "animate-[wiggle_0.45s]",
+                              isSuccessMessage && "animate-[successPulse_0.9s]"
                             )}
-                          </span>
-                        </div>
-                      </motion.div>
-                    ))}
+                            data-testid={`chat-message-${msg.role}`}
+                          >
+                            <div className="space-y-2 text-sm leading-6">
+                              {parseMessageSegments(msg.content).map(
+                                (segment, index) =>
+                                  segment.type === "link" ? (
+                                    <SmartLinkPill
+                                      key={`${msg.id}-link-${index}`}
+                                      linkId={segment.linkId}
+                                      className={cn(
+                                        "inline-flex",
+                                        msg.role === "user" &&
+                                          "bg-white/90 text-foreground"
+                                      )}
+                                    />
+                                  ) : (
+                                    <span
+                                      key={`${msg.id}-text-${index}`}
+                                      className="block whitespace-pre-wrap break-words"
+                                    >
+                                      {segment.content}
+                                    </span>
+                                  )
+                              )}
+                            </div>
+                            <span className="mt-2 block text-xs opacity-70">
+                              {new Date(msg.timestamp).toLocaleTimeString(
+                                locale === "ar" ? "ar-JO" : "en-US",
+                                { hour: "2-digit", minute: "2-digit" }
+                              )}
+                            </span>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
 
                     {isLoading && (
                       <motion.div
@@ -273,8 +332,8 @@ export function Chatbot() {
                         animate={{ opacity: 1 }}
                         className="flex justify-start"
                       >
-                        <div className="bg-muted text-foreground rounded-2xl px-4 py-2 flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                        <div className="flex items-center gap-3 rounded-3xl bg-white/80 px-4 py-3 text-foreground backdrop-blur dark:bg-white/10">
+                          <span className="loading-ring" />
                           <span className="text-sm">
                             {t("thinking", locale)}
                           </span>
@@ -285,7 +344,7 @@ export function Chatbot() {
                 </ScrollArea>
               </CardContent>
 
-              <CardFooter className="flex-col gap-3 border-t p-4">
+              <CardFooter className="flex-col gap-4 border-t border-white/40 p-5 dark:border-white/10">
                 {/* Quick Replies */}
                 {chatMessages.length === 0 && (
                   <div className="w-full">
@@ -297,12 +356,27 @@ export function Chatbot() {
                         <Badge
                           key={reply.id}
                           variant="secondary"
-                          className="cursor-pointer hover-elevate active-elevate-2"
+                          className="cursor-pointer rounded-full bg-white/80 px-3 py-2 text-xs font-medium text-foreground shadow-sm backdrop-blur transition hover:-translate-y-1 dark:bg-white/10"
                           onClick={() => handleQuickReply(reply.text[locale])}
                           data-testid={`quick-reply-${reply.id}`}
                         >
                           {reply.text[locale]}
                         </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {recommendedSmartLinks.length > 0 && (
+                  <div className="w-full">
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {locale === "ar"
+                        ? "روابط أورنج الرسمية"
+                        : "Official Orange links"}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {recommendedSmartLinks.map((linkId) => (
+                        <SmartLinkPill key={linkId} linkId={linkId} />
                       ))}
                     </div>
                   </div>
@@ -314,7 +388,7 @@ export function Chatbot() {
                     e.preventDefault();
                     handleSend();
                   }}
-                  className="flex w-full gap-2"
+                  className="flex w-full gap-3"
                 >
                   <Input
                     value={message}
@@ -340,4 +414,37 @@ export function Chatbot() {
       </AnimatePresence>
     </>
   );
+}
+
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "link"; linkId: SmartLinkId };
+
+function parseMessageSegments(content: string): MessageSegment[] {
+  const regex = /\[\[link:([a-z0-9-]+)\]\]/gi;
+  const segments: MessageSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({
+        type: "text",
+        content: content.slice(lastIndex, match.index),
+      });
+    }
+    const linkId = match[1]?.toLowerCase() as SmartLinkId;
+    segments.push({ type: "link", linkId });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", content: content.slice(lastIndex) });
+  }
+
+  if (segments.length === 0) {
+    return [{ type: "text", content }];
+  }
+
+  return segments;
 }

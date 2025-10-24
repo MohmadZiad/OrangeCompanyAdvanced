@@ -31,13 +31,14 @@ export function NumericKeypad({ onNumberClick, onClear, className = "" }: Numeri
           key={btn}
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
+          whileTap={{ scale: 0.9 }}
           transition={{ delay: idx * 0.02 }}
         >
           <Button
             variant="outline"
             size="lg"
             onClick={() => handleClick(btn)}
-            className="w-full h-12 text-lg font-medium hover-elevate active-elevate-2"
+            className="w-full h-12 text-lg font-semibold hover-elevate active-elevate-2"
             data-testid={`keypad-button-${btn === "⌫" ? "backspace" : btn === "." ? "dot" : btn}`}
             aria-label={btn === "⌫" ? "Delete" : btn}
           >

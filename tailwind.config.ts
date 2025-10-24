@@ -79,8 +79,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["Plus Jakarta Sans", "Inter", "var(--font-sans)", "sans-serif"],
-        display: ["Space Grotesk", "var(--font-sans)", "sans-serif"],
+        sans: ["Inter", "var(--font-sans)", "system-ui", "sans-serif"],
+        display: ["Poppins", "Inter", "var(--font-display)", "sans-serif"],
         serif: ["var(--font-serif)"],
         mono: ["JetBrains Mono", "var(--font-mono)", "monospace"],
       },

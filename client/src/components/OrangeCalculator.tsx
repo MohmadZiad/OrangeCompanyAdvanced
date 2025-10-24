@@ -5,13 +5,7 @@
 // ----------------------------------------------------------------------------
 
 import { useState, useEffect } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -26,7 +20,7 @@ import type { CalculatorResults } from "@shared/schema";
 export function OrangeCalculator() {
   const [basePrice, setBasePrice] = useState<string>("");
   const [results, setResults] = useState<CalculatorResults | null>(null);
-  const { locale } = useAppStore();
+  const { locale, setCalculatorResults } = useAppStore();
 
   // Append keypad digits (keep single dot)
   const handleNumberClick = (num: string) => {
@@ -64,23 +58,26 @@ export function OrangeCalculator() {
           dataOnly: out.dataOnly,
         };
         setResults(result);
+        setCalculatorResults(result);
       } catch {
         setResults(null);
+        setCalculatorResults(null);
       }
     } else {
       setResults(null);
+      setCalculatorResults(null);
     }
-  }, [basePrice]);
+  }, [basePrice, setCalculatorResults]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Title / Subtitle */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary text-primary-foreground">
+      <div className="flex flex-wrap items-center gap-4 rounded-3xl border border-white/60 bg-white/60 px-6 py-5 shadow-[0_20px_45px_-32px_rgba(255,90,0,0.45)] backdrop-blur-xl dark:bg-white/10">
+        <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_24px_60px_-34px_rgba(255,90,0,0.75)]">
           <Calculator className="h-6 w-6" />
         </div>
-        <div>
-          <h2 className="text-2xl font-bold" data-testid="text-calc-title">
+        <div className="flex-1 min-w-[220px]">
+          <h2 className="text-2xl font-semibold" data-testid="text-calc-title">
             {t("calcTitle", locale)}
           </h2>
           <p className="text-sm text-muted-foreground">
@@ -89,14 +86,18 @@ export function OrangeCalculator() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-8 lg:grid-cols-2">
         {/* Input Section */}
-        <Card>
+        <Card className="border-white/60 bg-white/70 dark:bg-white/10">
           <CardHeader>
-            <CardTitle>{t("basePrice", locale)}</CardTitle>
-            <CardDescription>{t("formula", locale)}: A</CardDescription>
+            <CardTitle className="flex items-center justify-between text-lg">
+              <span>{t("basePrice", locale)}</span>
+              <span className="rounded-full bg-white/60 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur-sm dark:bg-white/10">
+                {t("formula", locale)}: A
+              </span>
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="base-price-input">{t("basePrice", locale)}</Label>
               <Input
@@ -115,13 +116,14 @@ export function OrangeCalculator() {
             <NumericKeypad
               onNumberClick={handleNumberClick}
               onClear={handleClear}
+              className="pt-1"
             />
 
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 onClick={handleFullClear}
-                className="flex-1 hover-elevate active-elevate-2"
+                className="flex-1"
                 data-testid="button-clear"
               >
                 {t("clear", locale)}
@@ -129,7 +131,7 @@ export function OrangeCalculator() {
               <Button
                 variant="secondary"
                 onClick={handleFillExample}
-                className="flex-1 hover-elevate active-elevate-2"
+                className="flex-1"
                 data-testid="button-fill-example"
               >
                 {t("fillExample", locale)}
@@ -137,7 +139,7 @@ export function OrangeCalculator() {
             </div>
 
             {/* Textual formulae for transparency/help */}
-            <div className="text-xs text-muted-foreground font-mono space-y-1 pt-2 border-t">
+            <div className="neumorph-soft rounded-3xl border border-white/60 p-4 text-xs font-mono text-muted-foreground backdrop-blur dark:bg-white/5">
               <p className="font-semibold">{t("formula", locale)}:</p>
               <p>Nos_b_Nos: {CALCULATOR_FORMULAS.nosB_Nos}</p>
               <p>Voice Calls: {CALCULATOR_FORMULAS.voiceCallsOnly}</p>
@@ -147,7 +149,7 @@ export function OrangeCalculator() {
         </Card>
 
         {/* Results Section */}
-        <div className="space-y-4">
+        <div className="space-y-4" data-reveal>
           {results ? (
             <>
               <ResultCard
@@ -175,10 +177,12 @@ export function OrangeCalculator() {
                 index={3}
               />
             </>
-          ) : (
-            <Card className="h-full flex items-center justify-center min-h-[400px]">
-              <CardContent className="text-center">
-                <Calculator className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            ) : (
+            <Card className="flex min-h-[400px] items-center justify-center border-dashed border-white/50 bg-white/60 text-center shadow-none backdrop-blur-xl dark:bg-white/5">
+              <CardContent className="space-y-4 text-center">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-[#FF7A00]/30 to-[#FF3C00]/30">
+                  <Calculator className="h-8 w-8 text-primary" />
+                </div>
                 <p className="text-muted-foreground">
                   {t("noResults", locale)}
                 </p>

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { Theme, Locale, ChatMessage } from "@shared/schema";
+import type { Theme, Locale, ChatMessage, CalculatorResults } from "@shared/schema";
+import type { ProrataOutput } from "@/lib/proRata";
 
 interface AppState {
   theme: Theme | "neon" | "sunset";
@@ -13,6 +14,10 @@ interface AppState {
   setChatOpen: (open: boolean) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  calculatorResults: CalculatorResults | null;
+  setCalculatorResults: (results: CalculatorResults | null) => void;
+  prorataResult: ProrataOutput | null;
+  setProrataResult: (result: ProrataOutput | null) => void;
 }
 
 const loadFromStorage = <T>(key: string, def: T): T => {
@@ -33,53 +38,72 @@ const saveToStorage = <T>(key: string, v: T) => {
 
 const STORAGE_KEY = "orange-tools-storage";
 
-export const useAppStore = create<AppState>((set) => {
+export const useAppStore = create<AppState>((set, get) => {
   const stored = loadFromStorage(STORAGE_KEY, {
     theme: "orange" as Theme,
-    locale: (typeof navigator !== "undefined" &&
-    navigator.language.startsWith("ar")
-      ? "ar"
-      : "en") as Locale,
+    locale: (
+      typeof navigator !== "undefined" && navigator.language.startsWith("ar")
+        ? "ar"
+        : "en"
+    ) as Locale,
     chatMessages: [] as ChatMessage[],
   });
+
+  const syncDocumentTheme = (theme: Theme | "neon" | "sunset") => {
+    if (typeof document === "undefined") return;
+    document.documentElement.classList.remove(
+      "dark",
+      "orange",
+      "blossom",
+      "mint",
+      "neon",
+      "sunset"
+    );
+    if (theme === "dark") document.documentElement.classList.add("dark");
+    else document.documentElement.classList.add(theme as string);
+  };
+
+  const persist = () => {
+    const { theme, locale, chatMessages } = get();
+    saveToStorage(STORAGE_KEY, {
+      theme: (theme as Theme | "neon" | "sunset") ?? "orange",
+      locale,
+      chatMessages,
+    });
+  };
 
   return {
     theme: stored.theme as Theme | "neon" | "sunset",
     setTheme: (theme) => {
       set({ theme });
-      saveToStorage(STORAGE_KEY, { ...stored, theme });
-      document.documentElement.classList.remove(
-        "dark",
-        "orange",
-        "blossom",
-        "mint",
-        "neon",
-        "sunset"
-      );
-      if (theme === "dark") document.documentElement.classList.add("dark");
-      else document.documentElement.classList.add(theme as string);
+      syncDocumentTheme(theme);
+      persist();
     },
     locale: stored.locale,
     setLocale: (locale) => {
       set({ locale });
-      saveToStorage(STORAGE_KEY, { ...stored, locale });
-      document.documentElement.lang = locale;
-      document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+      if (typeof document !== "undefined") {
+        document.documentElement.lang = locale;
+        document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+      }
+      persist();
     },
     chatMessages: stored.chatMessages,
-    addChatMessage: (message) =>
-      set((s) => {
-        const msgs = [...s.chatMessages, message];
-        saveToStorage(STORAGE_KEY, { ...stored, chatMessages: msgs });
-        return { chatMessages: msgs };
-      }),
+    addChatMessage: (message) => {
+      set((s) => ({ chatMessages: [...s.chatMessages, message] }));
+      persist();
+    },
     clearChatMessages: () => {
       set({ chatMessages: [] });
-      saveToStorage(STORAGE_KEY, { ...stored, chatMessages: [] });
+      persist();
     },
     isChatOpen: false,
     setChatOpen: (open) => set({ isChatOpen: open }),
     activeTab: "calculator",
     setActiveTab: (tab) => set({ activeTab: tab }),
+    calculatorResults: null,
+    setCalculatorResults: (results) => set({ calculatorResults: results }),
+    prorataResult: null,
+    setProrataResult: (result) => set({ prorataResult: result }),
   };
 });
