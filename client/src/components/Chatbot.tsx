@@ -117,8 +117,9 @@ export function Chatbot() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
+      let streamDone = false;
 
-      while (true) {
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -130,7 +131,7 @@ export function Chatbot() {
           const data = line.slice(6).trim();
           if (!data) continue;
           if (data === "[DONE]") {
-            // خلصنا
+            streamDone = true;
             break;
           }
           try {
@@ -256,7 +257,7 @@ export function Chatbot() {
                 <ScrollArea className="h-full p-5" ref={scrollRef}>
                   <div className="space-y-4">
                     {chatMessages.length === 0 && (
-                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
+                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg白/5 dark:bg-white/5">
                         <MessageSquare className="mx-auto mb-4 h-12 w-12 opacity-70" />
                         <p className="text-sm">
                           {t("chatPlaceholder", locale)}
@@ -315,6 +316,7 @@ export function Chatbot() {
                                   )
                               )}
                             </div>
+
                             <span className="mt-2 block text-xs opacity-70">
                               {new Date(msg.timestamp).toLocaleTimeString(
                                 locale === "ar" ? "ar-JO" : "en-US",
