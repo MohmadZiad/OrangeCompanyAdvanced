@@ -98,35 +98,39 @@ Four beautiful themes with localStorage persistence:
 ## Project Structure
 
 ```
-├── client/
-│   ├── src/
-│   │   ├── components/      # React components
-│   │   │   ├── Chatbot.tsx          # AI assistant
-│   │   │   ├── OrangeCalculator.tsx # Price calculator
-│   │   │   ├── ProRataCalculator.tsx # Billing calculator
-│   │   │   ├── NumericKeypad.tsx     # Custom keypad
-│   │   │   ├── ResultCard.tsx        # Result display
-│   │   │   ├── ThemeToggle.tsx       # Theme switcher
-│   │   │   ├── LanguageToggle.tsx    # Language switcher
-│   │   │   ├── CopyButton.tsx        # Copy utility
-│   │   │   └── SummaryPanel.tsx      # Results summary
-│   │   ├── lib/             # Utility libraries
-│   │   │   ├── calc.ts      # Calculator formulas
-│   │   │   ├── proRata.ts   # Pro-rata logic
-│   │   │   ├── format.ts    # Number/currency/date formatting
-│   │   │   ├── i18n.ts      # Translations
-│   │   │   └── store.ts     # Zustand store
-│   │   ├── pages/           # Page components
-│   │   │   └── Home.tsx     # Main app page
-│   │   └── index.css        # Global styles + themes
-│   └── index.html
-├── server/
-│   ├── routes.ts            # API routes
-│   ├── openai.ts            # OpenAI client + system prompt
-│   └── index.ts             # Express server
+ProRataChatbot/
+├── client/                 ← واجهة المستخدم (React + Vite + Tailwind)
+│   └── src/
+│       ├── components/     ← عناصر الواجهة (الحاسبتين، الشات، لوحة الملخّص...)
+│       │   ├── OrangeCalculator.tsx
+│       │   ├── ProRataCalculator.tsx
+│       │   ├── Chatbot.tsx
+│       │   ├── SummaryPanel.tsx, NumericKeypad.tsx, ...
+│       │   └── ui/         ← عناصر shadcn/ui المصنّعة مسبقًا
+│       ├── lib/            ← منطق الأعمال والمساعدات
+│       │   ├── calc.ts     ← صيغ حاسبة أورنج (دوال نقية)
+│       │   ├── proRata.ts  ← صيغ الـ Pro-Rata (دوال نقية)
+│       │   ├── i18n.ts     ← ترجمات EN/AR و"ردود سريعة" للشات
+│       │   ├── format.ts   ← تنسيق عملة/تواريخ/أرقام (يدعم أرقام عربية)
+│       │   └── store.ts    ← Zustand (سمة/لغة/رسائل الشات)
+│       ├── pages/Home.tsx  ← التابات الثلاث: Calculator / Pro-Rata / Assistant
+│       ├── App.tsx, main.tsx, index.css
+│       └── index.html
+├── server/                 ← الخادم (Express)
+│   ├── index.ts            ← دخول التطبيق: يجهّز Express + Vite + الاستماع على المنفذ
+│   ├── routes.ts           ← مسارات الـ API (خصوصًا POST /api/chat + Rate-limit + SSE)
+│   ├── openai.ts           ← تهيئة OpenAI + SYSTEM_PROMPT
+│   ├── storage.ts          ← تخزين داخل الذاكرة (نموذجياً للمستخدمين)
+│   └── vite.ts             ← دمج Vite في التطوير/تقديم ملفات الإنتاج
 ├── shared/
-│   └── schema.ts            # Shared TypeScript types + Zod schemas
-└── README.md
+│   └── schema.ts           ← Zod سكيما + Types مشتركة (مدخلات/مخرجات الحاسبات، رسائل الشات، Theme/Locale...)
+├── attached_assets/        ← أصول ثابتة (أيقونات/صور…)
+├── tailwind.config.ts      ← إعداد ألوان ومتغيّرات الثيمات
+├── postcss.config.js
+├── vite.config.ts          ← Vite للواجهة + alias لـ "@", "@shared"
+├── package.json            ← سكربتات التشغيل والبناء
+└── README.md               ← تعليمات الاستخدام
+
 ```
 
 ## Usage

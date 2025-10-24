@@ -1,3 +1,5 @@
+import 'dotenv/config'; // يحمل .env تلقائياً
+
 import OpenAI from "openai";
 
 // Using OpenAI integration blueprint
