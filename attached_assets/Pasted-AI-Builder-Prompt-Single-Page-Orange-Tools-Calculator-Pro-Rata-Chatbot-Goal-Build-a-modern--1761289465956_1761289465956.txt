@@ -1,0 +1,247 @@
+AI Builder Prompt — Single-Page Orange Tools (Calculator + Pro-Rata + Chatbot)
+
+Goal
+Build a modern, single-page web app (no page reloads) with two main tools and a built-in chatbot:
+
+Orange Price Calculator
+
+Pro-Rata (15-day / single bill) Calculator
+
+Assistant Chatbot (OpenAI)
+
+Everything lives on one URL with tabbed navigation (or segmented control) that switches sections within the same page. Do not create separate routes or new pages.
+
+Tech Stack (required)
+
+Next.js 14 (App Router) with React 18, TypeScript
+
+Tailwind CSS (preferred) + shadcn/ui components; fallback acceptable: Bootstrap 5, but prefer Tailwind
+
+Zod + react-hook-form for form validation
+
+Zustand for lightweight client state
+
+Framer Motion for subtle transitions
+
+Lucide-react icons
+
+OpenAI SDK for chatbot (I will provide the API key via env)
+
+Optional (code paths ready but not mandatory): Prisma + Neon Postgres (feature-flagged; app should work without DB)
+
+Design & UX
+
+Clean, airy layout; grid-based; large rounded corners (2xl), soft shadows.
+
+Themes toggle: Orange (default), Dark, Blossom, Mint. Persist choice in localStorage.
+
+RTL/LTR: Full Arabic and English support via i18n (next-intl or next-i18next). RTL aware spacing & typography.
+
+Accessibility: Keyboard navigable, focus rings, ARIA roles/labels, WCAG AA contrast.
+
+Performance: Only client where needed; memoization; no blocking network calls.
+
+Single-Page Structure
+
+Top app bar with logo/title “Orange Tools”, theme switcher, language switcher (AR/EN), and a “Help” button opening the chatbot.
+
+Below the bar: a Tabs control with three tabs: Calculator, Pro-Rata, Assistant. Switching tabs keeps user on the same page (no scroll jump); also allow deep-links via hash (#calculator, #pro-rata, #assistant).
+
+Sticky summary panel on the right (desktop ≥1024px) showing current outputs and Copy buttons.
+
+1) Orange Price Calculator (Tab 1)
+
+Purpose
+Given a base price A, compute Orange pricing variants and show results instantly.
+
+Inputs & Interactions
+
+Numeric keypad UI (0–9, dot, clear) + a standard input field. Both stay in sync.
+
+Main action button = recalculates (but also update onChange for instant results).
+
+Copy buttons for each result card.
+
+Optional “Fill” button to apply example data.
+
+Outputs (cards with big numbers + “Copy”):
+
+Base: A
+
+Nos_b_Nos: A + (A/2 × 0.4616) + (A/2 × 0.16)
+
+Voice_Calls_Only: A × 1.4616
+
+Data_Only: A × 1.16
+
+Note: put the formula strings under the keypad (small, muted text) and use tooltips ? icons next to each card that show the formula.
+
+State/Validation
+
+Accept decimals; block negative; format to 2–3 decimals; display localized numerals in AR and standard in EN.
+
+2) Pro-Rata (15-day / single bill) Calculator (Tab 2)
+
+Purpose
+Compute percentage of cycle used up to 15 days and output prorated values with an explanatory paragraph in Arabic and English.
+
+Inputs
+
+Activation Date (date picker)
+
+Invoice Issue Date (usually first invoice after activation; date picker)
+
+Monthly Subscription Value (number, currency)
+
+Full Invoice Amount (with tax) (number, currency) — optional but displayed in UI with “Required” badge if needed
+
+“Give me end date until” (date picker) – optional for custom “until” computations.
+
+A toggle for “15-day cycle (single invoice)”.
+
+Outputs
+
+Days in cycle (15) and Days used since activation until invoice (computed)
+
+Percentage used (e.g., 83.87%)
+
+Prorated amount (JD currency by default; internationalized)
+
+Monthly subscription value echoed back
+
+Horizontal progress bar showing percent used
+
+A detailed explanation text block (like a receipt) in the current language:
+
+Dates (activation, first invoice, until date)
+
+Percentage math
+
+Prorated value, monthly value, and full invoice value (if provided)
+
+Buttons: Copy Text, Text-to-Speech (Web Speech API), Reset
+
+Logic (example outline; adjust to accurate business rules)
+
+Let cycleDays = 15.
+
+daysUsed = clamp( (untilDate || invoiceDate) - activationDate , 0, cycleDays )
+
+percent = (daysUsed / cycleDays) * 100 (show to 2 decimals)
+
+prorata = (monthlyValue * daysUsed) / cycleDays
+
+Currency: JD by default; localize number formatting.
+
+3) Assistant Chatbot (Tab 3 & Floating Button)
+
+Behavior
+
+A floating button opens a side panel (or the Assistant tab) with a chat UI.
+
+Provide a system prompt that the bot is an “Orange Tools Assistant” that explains the two calculators, formula details, and helps with data entry.
+
+Uses OpenAI (gpt-4o-mini or latest) via /api/chat route (Edge runtime ok).
+
+Load API key from process.env.OPENAI_API_KEY only; never hardcode.
+
+Features
+
+Messages persist in localStorage (not server).
+
+Sample quick-replies: “How to calculate Nos_b_Nos?”, “What is Pro-Rata?”, “Change language to Arabic”.
+
+Theming & Styling
+
+Implement theme tokens (Orange, Dark, Blossom, Mint) with CSS variables and Tailwind config. Provide a theme switcher (segmented control) and persist.
+
+Smooth micro-interactions (Framer Motion) for tab switch, card hover, keypad press, copy confirmations (toasts).
+
+Project Structure (App Router)
+/app
+  /api/chat/route.ts        // OpenAI proxy
+  /layout.tsx
+  /page.tsx                 // Tabs: Calculator | Pro-Rata | Assistant
+  /components
+    CalculatorPad.tsx
+    ResultCard.tsx
+    ProRataForm.tsx
+    ProgressBar.tsx
+    Chatbot.tsx
+    ThemeToggle.tsx
+    LangToggle.tsx
+    CopyButton.tsx
+  /lib
+    calc.ts                 // pure functions for formulas
+    proRata.ts              // pure functions + types
+    i18n.ts                 // i18n setup
+    format.ts               // currency/number formatters
+    store.ts                // zustand
+  /styles/globals.css
+
+
+Type Safety & Validation
+
+Types for all inputs/outputs.
+
+Zod schemas for both tools.
+
+Centralized error boundaries & toast notifications (shadcn/ui toast).
+
+Internationalization
+
+English + Arabic resources with full RTL support.
+
+Detect browser language on first load; allow manual switch.
+
+Numeral & currency formatting per locale.
+
+Security
+
+No API key exposed to client.
+
+Rate-limit /api/chat rudimentarily (per session) to avoid abuse.
+
+Testing (stretch)
+
+Vitest/RTL tests for calc.ts and proRata.ts.
+
+Deliverables
+
+Fully working Next.js project with Tailwind + shadcn configured.
+
+Clean, commented code with clear calc formulas.
+
+Readme with:
+
+npm i && npm run dev
+
+.env.local sample:
+
+OPENAI_API_KEY=sk-...
+NEXT_PUBLIC_DEFAULT_LOCALE=ar
+
+
+Optional DB section (commented Prisma schema + Neon connection) but app must run without a database.
+
+Acceptance Criteria
+
+Everything runs on a single route (/), with tabbed navigation and hash deep links.
+
+Both calculators work with instant results, copy buttons, and clear validations.
+
+Chatbot works with my API key, opening via floating button or the Assistant tab.
+
+Theming + dark mode + RTL all verified.
+
+No external backend required.
+
+Notes for the Builder
+
+Prefer client components for calculator interactions.
+
+Keep logic in pure utility files for easy testing.
+
+Use semantic HTML and ARIA attributes.
+
+Provide placeholder branding (“Orange Tools”), I’ll replace assets later.
