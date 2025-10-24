@@ -12,19 +12,20 @@ import { t } from "@/lib/i18n";
 
 export function ThemeToggle() {
   const { theme, setTheme, locale } = useAppStore();
-
-  const themes: { value: Theme; label: string }[] = [
+  const themes: { value: Theme | "neon" | "sunset"; label: string }[] = [
     { value: "orange", label: t("themeOrange", locale) },
     { value: "dark", label: t("themeDark", locale) },
     { value: "blossom", label: t("themeBlossom", locale) },
     { value: "mint", label: t("themeMint", locale) },
+    { value: "neon", label: "Neon ⚡" },
+    { value: "sunset", label: "Sunset 🌆" },
   ];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           size="icon"
           data-testid="button-theme-toggle"
           aria-label="Toggle theme"
