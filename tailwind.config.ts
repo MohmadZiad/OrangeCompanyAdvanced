@@ -7,6 +7,7 @@ export default {
     extend: {
       borderRadius: { lg: ".5625rem", md: ".375rem", sm: ".1875rem" },
       colors: {
+        // كل الألوان مبنية على CSS variables (نعرفها في globals.css)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
         border: "hsl(var(--border) / <alpha-value>)",
@@ -22,12 +23,12 @@ export default {
           border: "hsl(var(--popover-border) / <alpha-value>)",
         },
         primary: {
-          DEFAULT: "hsl(var(--primary) / <alpha-value>)",
+          DEFAULT: "hsl(var(--primary) / <alpha-value>)", // ORANGE
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
           border: "var(--primary-border)",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
+          DEFAULT: "hsl(var(--secondary) / <alpha-value>)", // PURPLE بالدّارك
           foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",
           border: "var(--secondary-border)",
         },
@@ -103,10 +104,20 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "fade-up": {
+          from: { opacity: 0, transform: "translateY(12px)" },
+          to: { opacity: 1, transform: "translateY(0)" },
+        },
+        "pulse-soft": {
+          "0%,100%": { transform: "scale(1)" },
+          "50%": { transform: "scale(.98)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "fade-up": "fade-up .35s ease-out both",
+        "pulse-soft": "pulse-soft .9s ease-in-out",
       },
     },
   },
