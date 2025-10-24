@@ -1,5 +1,17 @@
+// client/src/components/OrangeCalculator.tsx
+// ----------------------------------------------------------------------------
+// Production-ready calculator widget. Uses numeric inputs, keypad, and
+// shows live results. Results are numbers; formatting happens in ResultCard.
+// ----------------------------------------------------------------------------
+
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -16,15 +28,14 @@ export function OrangeCalculator() {
   const [results, setResults] = useState<CalculatorResults | null>(null);
   const { locale } = useAppStore();
 
+  // Append keypad digits (keep single dot)
   const handleNumberClick = (num: string) => {
     if (num === "." && basePrice.includes(".")) return;
-    setBasePrice(prev => prev + num);
+    setBasePrice((prev) => prev + num);
   };
 
   const handleClear = () => {
-    if (basePrice.length > 0) {
-      setBasePrice(prev => prev.slice(0, -1));
-    }
+    if (basePrice.length > 0) setBasePrice((prev) => prev.slice(0, -1));
   };
 
   const handleFullClear = () => {
@@ -32,25 +43,28 @@ export function OrangeCalculator() {
     setResults(null);
   };
 
-  const handleFillExample = () => {
-    setBasePrice("100");
-  };
+  const handleFillExample = () => setBasePrice("100");
 
+  // Manual typing guard: allow only numbers + one dot
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    // Allow only numbers and one decimal point
-    if (/^\d*\.?\d*$/.test(value)) {
-      setBasePrice(value);
-    }
+    if (/^\d*\.?\d*$/.test(value)) setBasePrice(value);
   };
 
-  // Calculate results in real-time as user types
+  /** Recalculate on every input change (numbers in/out; no formatting here) */
   useEffect(() => {
-    if (basePrice && !isNaN(parseFloat(basePrice))) {
+    const n = parseFloat(basePrice);
+    if (basePrice && !Number.isNaN(n)) {
       try {
-        const result = calculateOrangePricing({ basePrice: parseFloat(basePrice) });
+        const out = calculateOrangePricing({ basePrice: n });
+        const result: CalculatorResults = {
+          base: out.base,
+          nosB_Nos: out.nosB_Nos,
+          voiceCallsOnly: out.voiceCallsOnly,
+          dataOnly: out.dataOnly,
+        };
         setResults(result);
-      } catch (err) {
+      } catch {
         setResults(null);
       }
     } else {
@@ -60,6 +74,7 @@ export function OrangeCalculator() {
 
   return (
     <div className="space-y-6">
+      {/* Title / Subtitle */}
       <div className="flex items-center gap-3">
         <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary text-primary-foreground">
           <Calculator className="h-6 w-6" />
@@ -79,9 +94,7 @@ export function OrangeCalculator() {
         <Card>
           <CardHeader>
             <CardTitle>{t("basePrice", locale)}</CardTitle>
-            <CardDescription>
-              {t("formula", locale)}: A
-            </CardDescription>
+            <CardDescription>{t("formula", locale)}: A</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -123,6 +136,7 @@ export function OrangeCalculator() {
               </Button>
             </div>
 
+            {/* Textual formulae for transparency/help */}
             <div className="text-xs text-muted-foreground font-mono space-y-1 pt-2 border-t">
               <p className="font-semibold">{t("formula", locale)}:</p>
               <p>Nos_b_Nos: {CALCULATOR_FORMULAS.nosB_Nos}</p>

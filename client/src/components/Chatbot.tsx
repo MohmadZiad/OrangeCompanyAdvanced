@@ -1,5 +1,12 @@
+// client/src/components/Chatbot.tsx
 import { useState, useRef, useEffect } from "react";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,16 +22,27 @@ export function Chatbot() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } = useAppStore();
+  const abortRef = useRef<AbortController | null>(null);
 
+  const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
+    useAppStore();
+
+  // autoscroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatMessages]);
 
+  // cleanup على الإزالة
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const handleSend = async (text?: string) => {
-    const messageText = text || message;
+    const messageText = text ?? message;
     if (!messageText.trim() || isLoading) return;
 
     const userMessage: ChatMessage = {
@@ -38,7 +56,7 @@ export function Chatbot() {
     setMessage("");
     setIsLoading(true);
 
-    // Create a temporary assistant message for streaming
+    // رسالة مؤقتة للمساعد (البث)
     const assistantMessageId = (Date.now() + 1).toString();
     const tempAssistantMessage: ChatMessage = {
       id: assistantMessageId,
@@ -48,79 +66,89 @@ export function Chatbot() {
     };
     addChatMessage(tempAssistantMessage);
 
+    // إلغاء أي طلب سابق
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...chatMessages, userMessage].map(msg => ({
-            role: msg.role,
-            content: msg.content,
+          messages: [...chatMessages, userMessage].map((m) => ({
+            role: m.role,
+            content: m.content,
           })),
         }),
+        signal: ac.signal,
       });
 
       if (!response.ok) throw new Error("Failed to get response");
+      if (!response.body) throw new Error("No response body");
 
-      const reader = response.body?.getReader();
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let accumulatedContent = "";
+      let accumulated = "";
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                break;
-              }
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.content) {
-                  accumulatedContent += parsed.content;
-                  // Update the message content in the store
-                  useAppStore.setState((state) => ({
-                    chatMessages: state.chatMessages.map((msg) =>
-                      msg.id === assistantMessageId
-                        ? { ...msg, content: accumulatedContent }
-                        : msg
-                    ),
-                  }));
-                }
-                if (parsed.error) {
-                  throw new Error(parsed.error);
-                }
-              } catch (parseErr) {
-                // Ignore parse errors for incomplete chunks
-              }
+        const chunk = decoder.decode(value, { stream: true });
+        // SSE lines
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (!data) continue;
+          if (data === "[DONE]") {
+            // خلصنا
+            break;
+          }
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed?.content) {
+              accumulated += parsed.content;
+              useAppStore.setState((state) => ({
+                chatMessages: state.chatMessages.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: accumulated }
+                    : msg
+                ),
+              }));
             }
+            if (parsed?.error) {
+              throw new Error(parsed.error);
+            }
+          } catch {
+            // تجاهل الأسطر غير المكتملة
           }
         }
       }
 
-      // Ensure final message is in the store
-      if (accumulatedContent) {
+      // تأكيد الحفظ النهائي
+      if (accumulated) {
         useAppStore.setState((state) => ({
           chatMessages: state.chatMessages.map((msg) =>
             msg.id === assistantMessageId
-              ? { ...msg, content: accumulatedContent }
+              ? { ...msg, content: accumulated }
               : msg
           ),
         }));
       }
     } catch (err) {
-      console.error("Chat error:", err);
-      // Replace the temporary message with error
+      // خطأ: استبدل الرسالة المؤقتة برسالة خطأ ودية
       useAppStore.setState((state) => ({
         chatMessages: state.chatMessages.map((msg) =>
           msg.id === assistantMessageId
-            ? { ...msg, content: "Sorry, I encountered an error. Please try again." }
+            ? {
+                ...msg,
+                content:
+                  locale === "ar"
+                    ? "عذرًا، حدث خطأ أثناء المعالجة. حاول مرة أخرى."
+                    : "Sorry, I encountered an error. Please try again.",
+              }
             : msg
         ),
       }));
@@ -135,7 +163,7 @@ export function Chatbot() {
 
   return (
     <>
-      {/* Floating Button */}
+      {/* زر عائم لفتح الشات */}
       <AnimatePresence>
         {!isChatOpen && (
           <motion.div
@@ -155,7 +183,7 @@ export function Chatbot() {
               <MessageSquare className="h-6 w-6" />
               {chatMessages.length > 0 && (
                 <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs flex items-center justify-center">
-                  {chatMessages.filter(m => m.role === "assistant").length}
+                  {chatMessages.filter((m) => m.role === "assistant").length}
                 </span>
               )}
             </Button>
@@ -163,7 +191,7 @@ export function Chatbot() {
         )}
       </AnimatePresence>
 
-      {/* Chat Panel */}
+      {/* لوحة الشات */}
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
@@ -201,7 +229,9 @@ export function Chatbot() {
                     {chatMessages.length === 0 && (
                       <div className="text-center text-muted-foreground py-8">
                         <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p className="text-sm">{t("chatPlaceholder", locale)}</p>
+                        <p className="text-sm">
+                          {t("chatPlaceholder", locale)}
+                        </p>
                       </div>
                     )}
 
@@ -224,12 +254,14 @@ export function Chatbot() {
                           )}
                           data-testid={`chat-message-${msg.role}`}
                         >
-                          <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+                          <p className="text-sm whitespace-pre-wrap break-words">
+                            {msg.content}
+                          </p>
                           <span className="text-xs opacity-70 mt-1 block">
-                            {new Date(msg.timestamp).toLocaleTimeString(locale === "ar" ? "ar-JO" : "en-US", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {new Date(msg.timestamp).toLocaleTimeString(
+                              locale === "ar" ? "ar-JO" : "en-US",
+                              { hour: "2-digit", minute: "2-digit" }
+                            )}
                           </span>
                         </div>
                       </motion.div>
@@ -243,7 +275,9 @@ export function Chatbot() {
                       >
                         <div className="bg-muted text-foreground rounded-2xl px-4 py-2 flex items-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm">{t("thinking", locale)}</span>
+                          <span className="text-sm">
+                            {t("thinking", locale)}
+                          </span>
                         </div>
                       </motion.div>
                     )}

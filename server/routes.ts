@@ -1,66 +1,73 @@
+// server/routes.ts
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
 import { openai, SYSTEM_PROMPT } from "./openai";
 import { chatRequestSchema } from "@shared/schema";
 
-// Rate limiting map (simple in-memory)
+// Rate limiting (ذاكرة مؤقتة بسيطة)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_WINDOW = 60_000; // 1 دقيقة
 const RATE_LIMIT_MAX_REQUESTS = 10;
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  const record = rateLimitMap.get(ip);
-
-  if (!record || now > record.resetTime) {
+  const rec = rateLimitMap.get(ip);
+  if (!rec || now > rec.resetTime) {
     rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
     return true;
   }
-
-  if (record.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return false;
-  }
-
-  record.count++;
+  if (rec.count >= RATE_LIMIT_MAX_REQUESTS) return false;
+  rec.count++;
   return true;
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // OpenAI Chat endpoint with streaming support
+  // صحة
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+
+  // دردشة OpenAI مع بث SSE
   app.post("/api/chat", async (req, res) => {
     try {
-      // Rate limiting
-      const clientIp = req.ip || "unknown";
+      // Rate limit
+      const clientIp =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        (req.socket?.remoteAddress ?? "unknown");
       if (!checkRateLimit(clientIp)) {
-        return res.status(429).json({ 
-          error: "Too many requests. Please try again later." 
-        });
+        return res
+          .status(429)
+          .json({ error: "Too many requests. Please try again later." });
       }
 
-      // Validate request
-      const validation = chatRequestSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({ 
+      // Validate body
+      const parsed = chatRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
           error: "Invalid request format",
-          details: validation.error.errors 
+          details: parsed.error.errors,
         });
       }
 
-      const { messages } = validation.data;
+      const { messages } = parsed.data;
 
-      // Set headers for Server-Sent Events streaming
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      // SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
 
-      // Call OpenAI with streaming enabled
-      // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      // اختياري: نبضات للحفاظ على الاتصال
+      const keepAlive = setInterval(() => {
+        try {
+          res.write(`:\n\n`);
+        } catch {}
+      }, 25_000);
+
+      // استدعاء OpenAI مع البث
+      // ملاحظة: حسب طلبك، نستخدم gpt-5 ولا نغيره
       const stream = await openai.chat.completions.create({
         model: "gpt-5",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          ...messages.map(m => ({
+          ...messages.map((m) => ({
             role: m.role as "user" | "assistant",
             content: m.content,
           })),
@@ -69,33 +76,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stream: true,
       });
 
-      // Stream the response
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || '';
+        const content = chunk.choices?.[0]?.delta?.content || "";
         if (content) {
           res.write(`data: ${JSON.stringify({ content })}\n\n`);
         }
       }
 
-      // Send the done signal
+      clearInterval(keepAlive);
       res.write(`data: [DONE]\n\n`);
       res.end();
-    } catch (error: any) {
-      console.error("Chat API error:", error);
-      // For streaming, we need to send error in SSE format if headers already sent
+    } catch (err: any) {
+      // إن حصل خطأ أثناء البث
       if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        try {
+          res.write(
+            `data: ${JSON.stringify({
+              error: err?.message || "Stream error",
+            })}\n\n`
+          );
+        } catch {}
         res.end();
       } else {
-        res.status(500).json({ 
+        res.status(500).json({
           error: "Failed to process chat request",
-          message: error.message 
+          message: err?.message || String(err),
         });
       }
     }
   });
 
+  // نعيد HTTP server لتكامل Vite في index.ts
   const httpServer = createServer(app);
-
   return httpServer;
 }
