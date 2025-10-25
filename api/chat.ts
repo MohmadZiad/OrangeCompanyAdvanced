@@ -1,21 +1,14 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { openai, SYSTEM_PROMPT } from '../server/openai';
+// api/chat.ts
+import { openai, SYSTEM_PROMPT } from "../server/openai";
 import {
   chatRequestSchema,
   type ChatMessage,
   type DocEntry,
-} from '../shared/schema';
-import {
-  extractAndStoreDocs,
-  readDocs,
-  slugifyTitle,
-} from '../server/docs';
-import {
-  buildScript,
-  computeProrata,
-  ymd,
-} from '../client/src/lib/proRata';
+} from "../shared/schema";
+import { extractAndStoreDocs, readDocs, slugifyTitle } from "../server/docs";
+import { buildScript, computeProrata, ymd } from "../client/src/lib/proRata";
 
+// --- نفس المتغيرات والدوال المساعدة عندك (بدون تغيير) ---
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 10;
@@ -33,75 +26,67 @@ function checkRateLimit(ip: string): boolean {
 }
 
 const ARABIC_DIGIT_MAP: Record<string, string> = {
-  '٠': '0',
-  '١': '1',
-  '٢': '2',
-  '٣': '3',
-  '٤': '4',
-  '٥': '5',
-  '٦': '6',
-  '٧': '7',
-  '٨': '8',
-  '٩': '9',
+  "٠": "0",
+  "١": "1",
+  "٢": "2",
+  "٣": "3",
+  "٤": "4",
+  "٥": "5",
+  "٦": "6",
+  "٧": "7",
+  "٨": "8",
+  "٩": "9",
 };
 
-const NAVIGATION_TRIGGERS = /\b(افتح|فتح|افتحي|open|show|اذهب|navigate|شغل|عرض|روح)\b/iu;
+const NAVIGATION_TRIGGERS =
+  /\b(افتح|فتح|افتحي|open|show|اذهب|navigate|شغل|عرض|روح)\b/iu;
 
-const bilingual = (locale: 'ar' | 'en', ar: string, en: string) =>
-  locale === 'ar' ? `${ar}\n${en}` : `${en}\n${ar}`;
+const bilingual = (locale: "ar" | "en", ar: string, en: string) =>
+  locale === "ar" ? `${ar}\n${en}` : `${en}\n${ar}`;
 
 function normalizeDigits(input: string): string {
   return input
-    .split('')
-    .map((char) => ARABIC_DIGIT_MAP[char] ?? char)
-    .join('');
+    .split("")
+    .map((c) => ARABIC_DIGIT_MAP[c] ?? c)
+    .join("");
 }
 
 function buildDocsUpdateNote(
   update: { added: DocEntry[]; updated: DocEntry[] },
-  locale: 'ar' | 'en',
+  locale: "ar" | "en"
 ): string {
   const { added, updated } = update;
   const total = added.length + updated.length;
-  if (!total) return '';
-
-  const arSegments: string[] = [];
-  const enSegments: string[] = [];
-
+  if (!total) return "";
+  const ar: string[] = [];
+  const en: string[] = [];
   if (added.length) {
-    arSegments.push(`إضافة ${added.length} عنصر جديد`);
-    enSegments.push(`added ${added.length} new title${added.length > 1 ? 's' : ''}`);
+    ar.push(`إضافة ${added.length} عنصر جديد`);
+    en.push(`added ${added.length} new title${added.length > 1 ? "s" : ""}`);
   }
   if (updated.length) {
-    arSegments.push(`تحديث ${updated.length} عنصر`);
-    enSegments.push(`updated ${updated.length} title${updated.length > 1 ? 's' : ''}`);
+    ar.push(`تحديث ${updated.length} عنصر`);
+    en.push(`updated ${updated.length} title${updated.length > 1 ? "s" : ""}`);
   }
-
-  const ar = `تم تحديث قائمة المستندات (${arSegments.join(' و ')}).`;
-  const en = `Docs list refreshed (${enSegments.join(' & ')}).`;
-  return bilingual(locale, ar, en);
+  return bilingual(
+    locale,
+    `تم تحديث قائمة المستندات (${ar.join(" و ")}).`,
+    `Docs list refreshed (${en.join(" & ")}).`
+  );
 }
 
 function combineText(
-  locale: 'ar' | 'en',
+  locale: "ar" | "en",
   docNote: string,
-  main: { ar: string; en: string },
+  main: { ar: string; en: string }
 ): string {
   const primary = bilingual(locale, main.ar, main.en);
   return docNote ? `${docNote}\n${primary}` : primary;
 }
 
 type ProrataIntent =
-  | {
-      mode: 'gross';
-      activationDate: string;
-      fullInvoiceGross: number;
-    }
-  | {
-      mode: 'monthly';
-      activationDate: string;
-      monthlyNet: number;
-    };
+  | { mode: "gross"; activationDate: string; fullInvoiceGross: number }
+  | { mode: "monthly"; activationDate: string; monthlyNet: number };
 
 interface VatIntent {
   amount: number;
@@ -109,99 +94,86 @@ interface VatIntent {
 }
 
 function parseProrataIntent(message: string): ProrataIntent | null {
-  const normalized = normalizeDigits(message).replace(/[،,]/g, ' ');
+  const normalized = normalizeDigits(message).replace(/[،,]/g, " ");
   const dateMatch = normalized.match(/(20\d{2}-\d{2}-\d{2})/);
   if (!dateMatch) return null;
-
   const activationDate = dateMatch[1];
-
   const grossMatch = normalized.match(
-    /(gross|فاتورة|invoice|كاملة|اجمالي|إجمالي)[^0-9]*([0-9]+(?:\.[0-9]+)?)/i,
+    /(gross|فاتورة|invoice|كاملة|اجمالي|إجمالي)[^0-9]*([0-9]+(?:\.[0-9]+)?)/i
   );
   const monthlyMatch = normalized.match(
-    /(monthly|شهري|اشتراك|net|صافي|شهرية)[^0-9]*([0-9]+(?:\.[0-9]+)?)/i,
+    /(monthly|شهري|اشتراك|net|صافي|شهرية)[^0-9]*([0-9]+(?:\.[0-9]+)?)/i
   );
-
-  const parseAmount = (m: RegExpMatchArray | null) => (m ? Number.parseFloat(m[2]) : NaN);
-
+  const parseAmount = (m: RegExpMatchArray | null) =>
+    m ? Number.parseFloat(m[2]) : NaN;
   const grossValue = parseAmount(grossMatch);
   const monthlyValue = parseAmount(monthlyMatch);
-
   const hasGross = Number.isFinite(grossValue);
   const hasMonthly = Number.isFinite(monthlyValue);
-
   if (!hasGross && !hasMonthly) return null;
-
-  if (hasGross && (!hasMonthly || (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))) {
+  if (
+    hasGross &&
+    (!hasMonthly || (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))
+  ) {
     return {
-      mode: 'gross',
+      mode: "gross",
       activationDate,
       fullInvoiceGross: grossValue as number,
     };
   }
   return {
-    mode: 'monthly',
+    mode: "monthly",
     activationDate,
     monthlyNet: monthlyValue as number,
   };
 }
 
-const VAT_KEYWORDS = /(?:ضريبة|شامل|vat|ضريبه|tax|مع الضريبة|includes vat|include vat|with vat)/i;
-
+const VAT_KEYWORDS =
+  /(?:ضريبة|شامل|vat|ضريبه|tax|مع الضريبة|includes vat|include vat|with vat)/i;
 function parseVatIntent(message: string): VatIntent | null {
   const normalized = normalizeDigits(message);
   if (!VAT_KEYWORDS.test(normalized)) return null;
-
-  const numberMatches = Array.from(normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g));
-  if (numberMatches.length === 0) return null;
-
-  const amount = Number.parseFloat(numberMatches[0][1]);
+  const numbers = Array.from(normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g));
+  if (numbers.length === 0) return null;
+  const amount = Number.parseFloat(numbers[0][1]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-
   let quantity = 1;
-  const quantityPattern = normalized.match(
-    /(?:عدد|qty|quantity|pieces|بطاقات|كروت|شرائح|lines|x|×)\s*([0-9]+(?:\.[0-9]+)?)/i,
+  const m = normalized.match(
+    /(?:عدد|qty|quantity|pieces|بطاقات|كروت|شرائح|lines|x|×)\s*([0-9]+(?:\.[0-9]+)?)/i
   );
-  if (quantityPattern) {
-    const parsedQty = Number.parseFloat(quantityPattern[1]);
-    if (Number.isFinite(parsedQty) && parsedQty > 0) quantity = parsedQty;
+  if (m) {
+    const q = Number.parseFloat(m[1]);
+    if (Number.isFinite(q) && q > 0) quantity = q;
   }
-
   return { amount, quantity };
 }
 
-function detectDocNavigation(message: string, docs: DocEntry[]): { doc: DocEntry } | null {
+function detectDocNavigation(
+  message: string,
+  docs: DocEntry[]
+): { doc: DocEntry } | null {
   if (!NAVIGATION_TRIGGERS.test(message)) return null;
-
   const cleaned = normalizeDigits(message)
-    .replace(NAVIGATION_TRIGGERS, ' ')
-    .replace(/["'،,؛:!?]/g, ' ')
+    .replace(NAVIGATION_TRIGGERS, " ")
+    .replace(/["'،,؛:!?]/g, " ")
     .trim();
-
   const slug = slugifyTitle(cleaned || message);
   const tokens = slug.split(/-+/).filter(Boolean);
-
   let best: { doc: DocEntry; score: number } | null = null;
-
   for (const doc of docs) {
     const docSlug = doc.id || slugifyTitle(doc.title);
     const docTokens = docSlug.split(/-+/).filter(Boolean);
-
-    const hitCount = tokens.reduce((acc, token) => {
-      if (!token) return acc;
-      const match = docTokens.some((dt) => dt.startsWith(token) || token.startsWith(dt));
-      return match ? acc + 1 : acc;
-    }, 0);
-
+    const hit = tokens.reduce(
+      (acc, t) =>
+        acc +
+        (docTokens.some((dt) => dt.startsWith(t) || t.startsWith(dt)) ? 1 : 0),
+      0
+    );
     const score = docTokens.length
-      ? hitCount / Math.max(tokens.length, docTokens.length)
+      ? hit / Math.max(tokens.length, docTokens.length)
       : 0;
-
-    if (score > 0.45 && (!best || score > best.score)) {
-      best = { doc, score };
-    }
+    if (score > 0.45 && (!best || score > best.score)) best = { doc, score };
   }
-
   return best ? { doc: best.doc } : null;
 }
 
@@ -210,70 +182,72 @@ function buildAssistantMessage({
   content,
   payload,
 }: {
-  locale: 'ar' | 'en';
+  locale: "ar" | "en";
   content: string;
-  payload?: ChatMessage['payload'];
+  payload?: ChatMessage["payload"];
 }): ChatMessage {
   return {
     id: Date.now().toString(),
-    role: 'assistant',
+    role: "assistant",
     content,
     timestamp: Date.now(),
     payload,
   };
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+// 👇 بدون @vercel/node: استخدم any لتوقيع الطلب/الاستجابة
+export default async function handler(req: any, res: any) {
   try {
-    if (req.method !== 'POST') {
-      return res.status(405).json({ error: 'Method not allowed' });
-    }
+    if (req.method !== "POST")
+      return res.status(405).json({ error: "Method not allowed" });
 
     const clientIp =
-      (typeof req.headers['x-forwarded-for'] === 'string'
-        ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
-        : Array.isArray(req.headers['x-forwarded-for'])
-        ? req.headers['x-forwarded-for'][0]
+      (typeof req.headers["x-forwarded-for"] === "string"
+        ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
+        : Array.isArray(req.headers["x-forwarded-for"])
+        ? req.headers["x-forwarded-for"][0]
         : undefined) ||
       req.socket?.remoteAddress ||
-      'unknown';
+      "unknown";
 
     if (!checkRateLimit(clientIp)) {
       return res
         .status(429)
-        .json({ error: 'Too many requests. Please try again later.' });
+        .json({ error: "Too many requests. Please try again later." });
     }
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const parsed = chatRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return res.status(400).json({
-        error: 'Invalid request format',
-        details: parsed.error.errors,
-      });
+      return res
+        .status(400)
+        .json({
+          error: "Invalid request format",
+          details: parsed.error.errors,
+        });
     }
 
     const { messages, locale: requestedLocale } = parsed.data;
 
     const latestUserMessage = [...messages]
       .reverse()
-      .find((msg) => msg.role === 'user' && msg.content.trim());
-
+      .find((m) => m.role === "user" && m.content.trim());
     const docsBefore = await readDocs();
 
-    const detectedLocale: 'ar' | 'en' =
+    const detectedLocale: "ar" | "en" =
       requestedLocale ||
-      (latestUserMessage && /[\p{Script=Arabic}]/u.test(latestUserMessage.content)
-        ? 'ar'
-        : 'en');
+      (latestUserMessage &&
+      /[\p{Script=Arabic}]/u.test(latestUserMessage.content)
+        ? "ar"
+        : "en");
 
     const docUpdate = latestUserMessage
       ? await extractAndStoreDocs(latestUserMessage.content)
       : { added: [], updated: [] };
-
     const docs =
-      docUpdate.added.length || docUpdate.updated.length ? await readDocs() : docsBefore;
-
+      docUpdate.added.length || docUpdate.updated.length
+        ? await readDocs()
+        : docsBefore;
     const docUpdateNote = buildDocsUpdateNote(docUpdate, detectedLocale);
 
     if (latestUserMessage) {
@@ -284,32 +258,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           vatRate: 0.16 as const,
           anchorDay: 15 as const,
         };
-
         const result =
-          prorataIntent.mode === 'gross'
+          prorataIntent.mode === "gross"
             ? computeProrata({
-                mode: 'gross',
+                mode: "gross",
                 ...base,
                 fullInvoiceGross: prorataIntent.fullInvoiceGross,
               })
             : computeProrata({
-                mode: 'monthly',
+                mode: "monthly",
                 ...base,
                 monthlyNet: prorataIntent.monthlyNet,
               });
-
         const script = buildScript(result, detectedLocale);
-        const period = `${ymd(result.cycleStartUTC)} → ${ymd(result.cycleEndUTC)}`;
+        const period = `${ymd(result.cycleStartUTC)} → ${ymd(
+          result.cycleEndUTC
+        )}`;
         const coverageUntil = ymd(result.nextCycleEndUTC);
-
         const message = buildAssistantMessage({
           locale: detectedLocale,
           content: combineText(detectedLocale, docUpdateNote, {
-            ar: 'تم حساب البروراتا.',
-            en: 'Pro-rata calculation ready.',
+            ar: "تم حساب البروراتا.",
+            en: "Pro-rata calculation ready.",
           }),
           payload: {
-            kind: 'prorata',
+            kind: "prorata",
             locale: detectedLocale,
             data: {
               period,
@@ -324,7 +297,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           },
         });
-
         return res.status(200).json({ message });
       }
 
@@ -335,17 +307,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const subtotal = vatIntent.amount * vatIntent.quantity;
         const totalVat = unitVat * vatIntent.quantity;
         const totalDue = unitTotal * vatIntent.quantity;
-
-        const ar = `القيمة مع ضريبة %16 هي JD ${unitTotal.toFixed(3)} لكل وحدة (الضريبة: JD ${unitVat.toFixed(3)}).` +
-          `\nالإجمالي لعدد ${vatIntent.quantity}: صافي JD ${subtotal.toFixed(3)} + ضريبة JD ${totalVat.toFixed(3)} = JD ${totalDue.toFixed(3)}.`;
-        const en = `With 16% VAT, each unit is JD ${unitTotal.toFixed(3)} (VAT: JD ${unitVat.toFixed(3)}).` +
-          `\nTotal for ${vatIntent.quantity}: net JD ${subtotal.toFixed(3)} + VAT JD ${totalVat.toFixed(3)} = JD ${totalDue.toFixed(3)}.`;
-
+        const ar = `القيمة مع ضريبة %16 هي JD ${unitTotal.toFixed(
+          3
+        )} لكل وحدة (الضريبة: JD ${unitVat.toFixed(3)}).\nالإجمالي لعدد ${
+          vatIntent.quantity
+        }: صافي JD ${subtotal.toFixed(3)} + ضريبة JD ${totalVat.toFixed(
+          3
+        )} = JD ${totalDue.toFixed(3)}.`;
+        const en = `With 16% VAT, each unit is JD ${unitTotal.toFixed(
+          3
+        )} (VAT: JD ${unitVat.toFixed(3)}).\nTotal for ${
+          vatIntent.quantity
+        }: net JD ${subtotal.toFixed(3)} + VAT JD ${totalVat.toFixed(
+          3
+        )} = JD ${totalDue.toFixed(3)}.`;
         const message = buildAssistantMessage({
           locale: detectedLocale,
           content: combineText(detectedLocale, docUpdateNote, { ar, en }),
         });
-
         return res.status(200).json({ message });
       }
 
@@ -362,27 +341,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : `Add a link for "${docIntent.doc.title}" and try again.`,
           }),
           payload: {
-            kind: 'navigate-doc',
+            kind: "navigate-doc",
             locale: detectedLocale,
             doc: docIntent.doc,
             note: docUpdateNote || undefined,
           },
         });
-
         return res.status(200).json({ message });
       }
 
       if (docUpdateNote) {
         const lineCount = latestUserMessage.content
           .split(/\n+/)
-          .map((line) => line.trim())
+          .map((l) => l.trim())
           .filter(Boolean).length;
         if (lineCount >= 3 && !/[?؟]/.test(latestUserMessage.content)) {
           const message = buildAssistantMessage({
             locale: detectedLocale,
             content: docUpdateNote,
             payload: {
-              kind: 'docs-update',
+              kind: "docs-update",
               locale: detectedLocale,
               added: docUpdate.added,
               updated: docUpdate.updated,
@@ -393,73 +371,66 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+    // SSE streaming
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
     const keepAlive = setInterval(() => {
       try {
-        res.write(':\n\n');
-      } catch (err) {
-        console.error('keepalive error', err);
-      }
+        res.write(":\n\n");
+      } catch {}
     }, 25_000);
 
-    const sanitizedMessages: ChatMessage[] = messages.map((m) => ({
+    const sanitized: ChatMessage[] = messages.map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
       timestamp: m.timestamp,
     }));
-
-    const composedMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+    const composed = [
+      { role: "system", content: SYSTEM_PROMPT },
       {
-        role: 'system',
-        content: `Docs available: ${docs
-          .map((doc) => `${doc.title} (${doc.url || 'pending'})`)
-          .join(' | ')}`,
+        role: "system",
+        content: `Docs available: ${(await readDocs())
+          .map((d) => `${d.title} (${d.url || "pending"})`)
+          .join(" | ")}`,
       },
-      ...sanitizedMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
+      ...sanitized.map((m) => ({
+        role: m.role as "user" | "assistant",
         content: m.content,
       })),
-    ];
+    ] as { role: "system" | "user" | "assistant"; content: string }[];
 
     const stream = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: composedMessages,
+      model: "gpt-4o-mini",
+      messages: composed,
       max_tokens: 1024,
       stream: true,
     });
 
-    if (docUpdateNote) {
-      res.write(`data: ${JSON.stringify({ content: `${docUpdateNote}\n` })}\n\n`);
-    }
+    // optional prelude
+    const prelude = docUpdateNote ? `${docUpdateNote}\n` : "";
+    if (prelude) res.write(`data: ${JSON.stringify({ content: prelude })}\n\n`);
 
     for await (const chunk of stream) {
-      const content = chunk.choices?.[0]?.delta?.content || '';
-      if (content) {
-        res.write(`data: ${JSON.stringify({ content })}\n\n`);
-      }
+      const content = chunk.choices?.[0]?.delta?.content || "";
+      if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
     }
 
     clearInterval(keepAlive);
-    res.write('data: [DONE]\n\n');
+    res.write("data: [DONE]\n\n");
     res.end();
-    return;
   } catch (e: any) {
-    if (!res.headersSent) {
-      const status = typeof e?.status === 'number' ? e.status : 500;
-      res.status(status).json({ error: e?.message || 'chat error' });
-      return;
-    }
-
+    if (!res.headersSent)
+      return res
+        .status(typeof e?.status === "number" ? e.status : 500)
+        .json({ error: e?.message || "chat error" });
     try {
-      res.write(`data: ${JSON.stringify({ error: e?.message || 'chat error' })}\n\n`);
-    } catch {
-      // ignore
-    }
+      res.write(
+        `data: ${JSON.stringify({ error: e?.message || "chat error" })}\n\n`
+      );
+    } catch {}
     res.end();
   }
 }

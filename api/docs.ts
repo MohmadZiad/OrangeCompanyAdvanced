@@ -1,14 +1,18 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+// api/docs.ts
 import fs from 'fs';
 import path from 'path';
 
-export default function handler(req: VercelRequest, res: VercelResponse) {
+export default function handler(req: any, res: any) {
   try {
     const file = path.join(process.cwd(), 'shared', 'docs.json');
     const raw = fs.readFileSync(file, 'utf-8');
     const json = JSON.parse(raw);
-    res.status(200).json(json);
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(json));
   } catch (e: any) {
-    res.status(500).json({ error: e?.message || 'docs error' });
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: e?.message || 'docs error' }));
   }
 }

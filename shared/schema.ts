@@ -114,7 +114,7 @@ export type ChatRequest = z.infer<typeof chatRequestSchema>;
 // Theme & Locale Types
 // ============================================================================
 
-export type Theme = "orange" | "dark" | "blossom" | "mint";
+export type AppTheme = "orange" | "dark" | "blossom" | "mint";
 export type Locale = "en" | "ar";
 
 // ============================================================================
