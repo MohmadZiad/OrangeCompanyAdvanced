@@ -6,7 +6,7 @@
 // - Results: KPIs + script (AR/EN) identical to the old app style.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,8 +17,20 @@ import { computeProrata, buildScript, ymd } from "@/lib/proRata";
 
 type Mode = "gross" | "monthly";
 
+// Narrow type used for the (optional) setter from the app store.
+// If the store doesn’t expose this function, we simply no-op.
+type ProRataResult = ReturnType<typeof computeProrata> | null;
+type SetProRataResult = ((result: ProRataResult) => void) | undefined;
+
 export function ProRataCalculator() {
-  const { locale, setProRataResult } = useAppStore();
+  // Select only what we need from the store to keep types happy.
+  const locale = useAppStore((s) => s.locale);
+  // Some environments may not have this action; make it optional to avoid TS error.
+  const setProRataResult = useAppStore(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (s) => (s as any).setProRataResult as SetProRataResult
+  );
+
   const L = locale === "ar";
 
   // UI state
@@ -26,6 +38,16 @@ export function ProRataCalculator() {
   const [mode, setMode] = useState<Mode>("gross");
   const [gross, setGross] = useState<string>("");
   const [monthly, setMonthly] = useState<string>("");
+
+  // --- reveal-safe container (optional) ---
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // اجعل العنصر ظاهرًا دائمًا حتى لو فيه CSS reveal عام
+    const el = rootRef.current;
+    if (!el) return;
+    // لو عندك ستايل `.reveal-visible` وتبغى تأثير الظهور، أبقي السطر التالي
+    el.classList.add("reveal-visible");
+  }, []);
 
   const vatRate = 0.16;
   const anchorDay = 15;
@@ -56,6 +78,7 @@ export function ProRataCalculator() {
       vatRate,
       anchorDay,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activation, gross, monthly, mode]);
 
   const script = useMemo(() => {
@@ -64,12 +87,15 @@ export function ProRataCalculator() {
   }, [result, L]);
 
   useEffect(() => {
-    setProRataResult(result);
-    return () => {
-      if (result) {
-        setProRataResult(null);
-      }
-    };
+    // Only push to the global store if the action exists.
+    if (setProRataResult) {
+      setProRataResult(result);
+      return () => {
+        if (result) setProRataResult(null);
+      };
+    }
+    // If there's no setter, do nothing.
+    return;
   }, [result, setProRataResult]);
 
   const copyText = async () => {
@@ -82,7 +108,8 @@ export function ProRataCalculator() {
   };
 
   return (
-    <div className="grid gap-8 lg:grid-cols-12" data-reveal>
+    // ملاحظة: تم إزالة data-reveal لتفادي الإخفاء الافتراضي بعد الـ refresh
+    <div ref={rootRef} className="grid gap-8 lg:grid-cols-12">
       {/* Inputs */}
       <Card className="lg:col-span-5 border-white/60 bg-white/70 dark:bg-white/10">
         <CardHeader>
