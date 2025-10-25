@@ -14,10 +14,12 @@ const buttonVariants = cva(
           "bg-destructive text-destructive-foreground border border-destructive-border shadow-[0_18px_38px_-20px_rgba(255,72,0,0.75)]",
         outline:
           "border border-transparent bg-white/70 dark:bg-white/5 text-foreground shadow-[0_12px_28px_-22px_rgba(10,12,15,0.55)]",
+        /** secondary مفعّل هنا */
         secondary:
           "border border-secondary-border bg-secondary text-secondary-foreground shadow-[0_12px_28px_-22px_rgba(10,12,15,0.45)]",
         ghost:
           "border border-transparent bg-transparent text-foreground hover:bg-white/10",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "min-h-11 px-5 py-2",
@@ -39,6 +41,8 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, onClick, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+
+    // Ripple effect (اختياري — يعمل مع كل الـ variants)
     const [ripples, setRipples] = React.useState<
       { id: number; x: number; y: number; size: number }[]
     >([]);
@@ -51,16 +55,14 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       const id = rippleId.current++;
-      setRipples((current) => [...current, { id, x, y, size }]);
+      setRipples((curr) => [...curr, { id, x, y, size }]);
       window.setTimeout(() => {
-        setRipples((current) => current.filter((ripple) => ripple.id !== id));
+        setRipples((curr) => curr.filter((r) => r.id !== id));
       }, 550);
     };
 
     const handleClick = (event: React.MouseEvent<HTMLElement>) => {
-      if (!props.disabled) {
-        handleRipple(event);
-      }
+      if (!props.disabled) handleRipple(event);
       onClick?.(event as React.MouseEvent<HTMLButtonElement>);
     };
 

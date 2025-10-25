@@ -1,5 +1,6 @@
+import * as React from "react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonProps } from "@/components/ui/button";
 import { Check, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAppStore } from "@/lib/store";
@@ -8,17 +9,20 @@ import { t } from "@/lib/i18n";
 interface CopyButtonProps {
   text: string;
   label?: string;
-  variant?: "default" | "ghost" | "outline";
-  size?: "default" | "sm" | "lg" | "icon";
+  /** يطابق تمامًا أنواع زر shadcn/ui */
+  variant?: ButtonProps["variant"];
+  size?: ButtonProps["size"];
   className?: string;
+  onCopied?: () => void;
 }
 
-export function CopyButton({ 
-  text, 
-  label, 
-  variant = "ghost", 
+export function CopyButton({
+  text,
+  label,
+  variant = "secondary",
   size = "sm",
-  className = "" 
+  className = "",
+  onCopied,
 }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
@@ -28,11 +32,12 @@ export function CopyButton({
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
+      onCopied?.();
       toast({
         description: t("copied", locale),
         duration: 2000,
       });
-      setTimeout(() => setCopied(false), 2000);
+      window.setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
     }
@@ -40,6 +45,7 @@ export function CopyButton({
 
   return (
     <Button
+      type="button"
       variant={variant}
       size={size}
       onClick={handleCopy}
@@ -47,12 +53,10 @@ export function CopyButton({
       data-testid="button-copy"
       aria-label={label || t("copy", locale)}
     >
-      {copied ? (
-        <Check className="h-4 w-4" />
-      ) : (
-        <Copy className="h-4 w-4" />
+      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      {label && (
+        <span className={size === "icon" ? "sr-only" : ""}>{label}</span>
       )}
-      {label && <span className={size === "icon" ? "sr-only" : ""}>{label}</span>}
     </Button>
   );
 }
