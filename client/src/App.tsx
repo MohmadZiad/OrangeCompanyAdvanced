@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/Home";
 import NotFound from "@/pages/not-found";
 import { AmbientBackdrop } from "@/components/AmbientBackdrop";
-import { SplashScreen } from "@/components/SplashScreen";
+import SplashScreen from "./components/SplashScreen";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 
 function Router() {

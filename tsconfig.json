@@ -5,14 +5,21 @@
     "incremental": true,
     "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
     "noEmit": true,
+
+    // 🔥 مهم جداً لإتاحة /u و \p{...}
+    "target": "ES2020",
+
     "module": "ESNext",
     "strict": true,
-    "lib": ["esnext", "dom", "dom.iterable"],
+
+    // مكتبات حديثة + DOM
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
     "jsx": "preserve",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "Bundler",
     "baseUrl": ".",
     "types": ["node", "vite/client"],
     "paths": {

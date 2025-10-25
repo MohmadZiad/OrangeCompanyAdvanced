@@ -9,14 +9,13 @@ import { getSmartLinkCandidates, type SmartLinkId } from "@/lib/smartLinks";
 import { Badge } from "@/components/ui/badge";
 import { ymd } from "@/lib/proRata";
 
+function hasLatin(s: string) {
+  return /[A-Za-z]/.test(s);
+}
+
 function SummaryContent() {
-  const {
-    locale,
-    activeTab,
-    calculatorResults,
-    prorataResult,
-    chatMessages,
-  } = useAppStore();
+  const { locale, activeTab, calculatorResults, prorataResult, chatMessages } =
+    useAppStore();
 
   const tabLabelMap: Record<string, string> = {
     calculator: t("calculator", locale),
@@ -66,7 +65,10 @@ function SummaryContent() {
           value={formatCurrency(calculatorResults.dataOnly, locale)}
         />
       </div>
-      <Badge variant="outline" className="inline-flex items-center gap-2 text-xs">
+      <Badge
+        variant="outline"
+        className="inline-flex items-center gap-2 text-xs"
+      >
         <CalculatorIcon />
         {locale === "ar"
           ? "تتحدث هذه النتائج مباشرة مع الحاسبة الرئيسية"
@@ -135,7 +137,10 @@ function SummaryContent() {
           )}
         </p>
       </div>
-      <Badge variant="outline" className="inline-flex items-center gap-2 text-xs">
+      <Badge
+        variant="outline"
+        className="inline-flex items-center gap-2 text-xs"
+      >
         <MessageSquare className="h-4 w-4" />
         {locale === "ar"
           ? "المحادثة محفوظة محليًا"
@@ -175,23 +180,10 @@ function SummaryContent() {
           className="space-y-5 rounded-3xl border border-white/55 bg-white/65 p-5 text-sm shadow-[0_26px_48px_-36px_rgba(255,90,0,0.45)] backdrop-blur-xl dark:bg-white/10"
         >
           <span className="text-xs uppercase tracking-[0.28em] text-primary">
-            {t("currentResults", locale)} · {tabLabelMap[activeTab] ?? activeTab}
+            {t("currentResults", locale)} ·{" "}
+            {tabLabelMap[activeTab] ?? activeTab}
           </span>
           {body}
-          {suggestedLinks.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground">
-                {locale === "ar"
-                  ? "روابط رسمية مقترحة"
-                  : "Suggested official links"}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {suggestedLinks.map((linkId) => (
-                  <SmartLinkPill key={linkId} linkId={linkId} />
-                ))}
-              </div>
-            </div>
-          )}
         </motion.div>
       </AnimatePresence>
     </>
@@ -205,10 +197,17 @@ function MetricTile({
   label: string;
   value: string | number;
 }) {
+  const { locale } = useAppStore();
   return (
     <div className="rounded-3xl border border-white/60 bg-white/80 p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] backdrop-blur dark:bg-white/10">
       <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-        {label}
+        {locale === "ar" && hasLatin(label) ? (
+          <span dir="ltr" lang="en" className="font-sans">
+            {label}
+          </span>
+        ) : (
+          label
+        )}
       </p>
       <p className="mt-2 font-mono text-lg font-semibold text-foreground">
         {value}
