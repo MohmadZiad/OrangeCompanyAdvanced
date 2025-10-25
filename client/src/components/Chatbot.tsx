@@ -37,18 +37,11 @@ export function Chatbot() {
   const handledDocsUpdates = useRef<Set<string>>(new Set());
   const hasSeededNavigate = useRef(false);
 
-  const {
-    isChatOpen,
-    setChatOpen,
-    chatMessages,
-    addChatMessage,
-    locale,
-    activeTab,
-  } = useAppStore();
+  const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
+    useAppStore();
 
   const { toast } = useToast();
   const isArabic = locale === "ar";
-  const isAssistantView = activeTab === "assistant";
 
   // Smart links recommendations
   const recommendedSmartLinks = useMemo(() => {
@@ -312,7 +305,7 @@ export function Chatbot() {
     <>
       {/* Floating button to open chat */}
       <AnimatePresence>
-        {!isChatOpen && !isAssistantView && (
+        {!isChatOpen && (
           <motion.div
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -342,45 +335,18 @@ export function Chatbot() {
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
-            initial={
-              isAssistantView
-                ? { opacity: 0, scale: 0.95 }
-                : { x: isArabic ? -400 : 400, opacity: 0 }
-            }
-            animate={
-              isAssistantView
-                ? { opacity: 1, scale: 1 }
-                : { x: 0, opacity: 1 }
-            }
-            exit={
-              isAssistantView
-                ? { opacity: 0, scale: 0.95 }
-                : { x: isArabic ? -400 : 400, opacity: 0 }
-            }
-            transition={
-              isAssistantView
-                ? { duration: 0.35, ease: [0.16, 1, 0.3, 1] }
-                : { type: "spring", damping: 25, stiffness: 200 }
-            }
+            initial={{ x: isArabic ? -400 : 400, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: isArabic ? -400 : 400, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
             className={cn(
-              isAssistantView
-                ? "fixed inset-0 z-50 flex items-center justify-center bg-black/15 px-4 py-6 sm:px-6"
-                : cn(
-                    "fixed top-0 bottom-0 z-50 w-full sm:w-[420px]",
-                    isArabic ? "left-0" : "right-0"
-                  )
+              "fixed top-0 bottom-0 z-50 w-full sm:w-[420px] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
+              isArabic ? "left-0" : "right-0"
             )}
             style={{ direction: isArabic ? "rtl" : "ltr" }}
             data-testid="chat-panel"
           >
-            <Card
-              className={cn(
-                "flex h-full w-full flex-col backdrop-blur-2xl",
-                isAssistantView
-                  ? "max-w-4xl overflow-hidden rounded-[3rem] border border-white/40 bg-white/85 shadow-[0_45px_140px_-60px_rgba(10,10,10,0.35)] sm:h-auto sm:max-h-[90vh]"
-                  : "rounded-none border-0 bg-white/75 shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)] sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10"
-              )}
-            >
+            <Card className="flex h-full flex-col rounded-none border-0 bg-white/75 backdrop-blur-2xl sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-white/50 pb-4 dark:border-white/10">
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white">
