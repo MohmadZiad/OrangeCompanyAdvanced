@@ -1,3 +1,4 @@
+// server/routes.ts
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { openai, SYSTEM_PROMPT } from "./openai";
@@ -9,7 +10,7 @@ import {
 import { extractAndStoreDocs, readDocs, slugifyTitle } from "./docs";
 import { computeProrata, buildScript, ymd } from "../client/src/lib/proRata";
 
-// Rate limiting (ذاكرة مؤقتة بسيطة)
+/* ----------------------------- Rate limiting ----------------------------- */
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60_000; // 1 دقيقة
 const RATE_LIMIT_MAX_REQUESTS = 10;
@@ -26,6 +27,7 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
+/* --------------------------- Helpers & constants -------------------------- */
 const ARABIC_DIGIT_MAP: Record<string, string> = {
   "٠": "0",
   "١": "1",
@@ -39,7 +41,7 @@ const ARABIC_DIGIT_MAP: Record<string, string> = {
   "٩": "9",
 };
 
-// ملاحظة: يتطلب علمتا i/u دعم ES2018+. اضبط tsconfig: "target": "es2018" أو أعلى.
+// ملاحظة: يتطلب علمتا i/u دعم ES2018+. اضبط tsconfig: { "target": "es2018" } أو أعلى.
 const NAVIGATION_TRIGGERS =
   /\b(افتح|فتح|افتحي|open|show|اذهب|navigate|شغل|عرض|روح)\b/iu;
 
@@ -91,12 +93,19 @@ function combineText(
   return docNote ? `${docNote}\n${primary}` : primary;
 }
 
-interface ProrataIntent {
-  mode: "gross" | "monthly";
-  activationDate: string;
-  fullInvoiceGross?: number;
-  monthlyNet?: number;
-}
+/* ------------------------ Intents & parsing helpers ----------------------- */
+/** أفضل ممارسة: اتحاد مميّز لتفادي number|undefined */
+type ProrataIntent =
+  | {
+      mode: "gross";
+      activationDate: string;
+      fullInvoiceGross: number; // إلزامي في وضع gross
+    }
+  | {
+      mode: "monthly";
+      activationDate: string;
+      monthlyNet: number; // إلزامي في وضع monthly
+    };
 
 interface VatIntent {
   amount: number;
@@ -117,30 +126,32 @@ function parseProrataIntent(message: string): ProrataIntent | null {
     /(monthly|شهري|اشتراك|net|صافي|شهرية)[^0-9]*([0-9]+(?:\.[0-9]+)?)/i
   );
 
-  const parseAmount = (match: RegExpMatchArray | null) => {
-    if (!match) return undefined;
-    const value = Number.parseFloat(match[2]);
-    return Number.isFinite(value) ? value : undefined;
-  };
+  const parseAmount = (m: RegExpMatchArray | null) =>
+    m ? Number.parseFloat(m[2]) : NaN;
 
   const grossValue = parseAmount(grossMatch);
   const monthlyValue = parseAmount(monthlyMatch);
 
-  if (grossValue == null && monthlyValue == null) return null;
+  const hasGross = Number.isFinite(grossValue);
+  const hasMonthly = Number.isFinite(monthlyValue);
+
+  if (!hasGross && !hasMonthly) return null;
 
   if (
-    grossValue != null &&
-    (monthlyValue == null ||
-      (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))
+    hasGross &&
+    (!hasMonthly || (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))
   ) {
-    return { mode: "gross", activationDate, fullInvoiceGross: grossValue };
+    return {
+      mode: "gross",
+      activationDate,
+      fullInvoiceGross: grossValue as number,
+    };
   }
-
-  if (monthlyValue != null) {
-    return { mode: "monthly", activationDate, monthlyNet: monthlyValue };
-  }
-
-  return null;
+  return {
+    mode: "monthly",
+    activationDate,
+    monthlyNet: monthlyValue as number,
+  };
 }
 
 const VAT_KEYWORDS =
@@ -164,9 +175,7 @@ function parseVatIntent(message: string): VatIntent | null {
   );
   if (quantityPattern) {
     const parsedQty = Number.parseFloat(quantityPattern[1]);
-    if (Number.isFinite(parsedQty) && parsedQty > 0) {
-      quantity = parsedQty;
-    }
+    if (Number.isFinite(parsedQty) && parsedQty > 0) quantity = parsedQty;
   }
 
   return { amount, quantity };
@@ -230,6 +239,7 @@ function buildAssistantMessage({
   };
 }
 
+/* --------------------------------- Routes -------------------------------- */
 export async function registerRoutes(app: Express): Promise<Server> {
   // صحة
   app.get("/health", (_req, res) => res.json({ ok: true }));
@@ -276,7 +286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const docsBefore = await readDocs();
 
-      const detectedLocale =
+      const detectedLocale: "ar" | "en" =
         requestedLocale ??
         (latestUserMessage &&
         /[\p{Script=Arabic}]/u.test(latestUserMessage.content)
@@ -294,23 +304,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const docUpdateNote = buildDocsUpdateNote(docUpdate, detectedLocale);
 
-      // --- Pro-rata intent ---
+      /* ------------------------------ Pro-rata ------------------------------ */
       const prorataIntent = latestUserMessage
         ? parseProrataIntent(latestUserMessage.content)
         : null;
 
       if (prorataIntent) {
-        const result = computeProrata({
-          mode: prorataIntent.mode,
+        // تضييق حسب الـ mode لضمان أرقام مؤكدة
+        const base = {
           activationDate: prorataIntent.activationDate,
-          fullInvoiceGross: prorataIntent.fullInvoiceGross,
-          monthlyNet: prorataIntent.monthlyNet,
-          vatRate: 0.16,
-          anchorDay: 15,
-        });
+          vatRate: 0.16 as const,
+          anchorDay: 15 as const,
+        };
+
+        const result =
+          prorataIntent.mode === "gross"
+            ? computeProrata({
+                mode: "gross",
+                ...base,
+                fullInvoiceGross: prorataIntent.fullInvoiceGross,
+              })
+            : computeProrata({
+                mode: "monthly",
+                ...base,
+                monthlyNet: prorataIntent.monthlyNet,
+              });
 
         const script = buildScript(result, detectedLocale);
-
         const period = `${ymd(result.cycleStartUTC)} → ${ymd(
           result.cycleEndUTC
         )}`;
@@ -342,7 +362,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ message });
       }
 
-      // --- VAT intent ---
+      /* --------------------------------- VAT -------------------------------- */
       const vatIntent = latestUserMessage
         ? parseVatIntent(latestUserMessage.content)
         : null;
@@ -377,7 +397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ message });
       }
 
-      // --- Doc navigation intent ---
+      /* --------------------------- Doc navigation --------------------------- */
       const docIntent = latestUserMessage
         ? detectDocNavigation(latestUserMessage.content, docs)
         : null;
@@ -404,7 +424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ message });
       }
 
-      // If only docs were updated and the user sent a long, non-question message, surface the update note
+      // لو فقط تم تحديث المستندات والرسالة طويلة بدون علامة سؤال—اعرض الملاحظة
       if (docUpdateNote && latestUserMessage) {
         const lineCount = latestUserMessage.content
           .split(/\n+/)
@@ -425,7 +445,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // SSE headers
+      /* ------------------------------- Streaming ----------------------------- */
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
@@ -463,7 +483,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stream = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: composedMessages,
-        max_tokens: 1024, // ✅ صح مع chat.completions
+        max_tokens: 1024,
         stream: true,
       });
 
@@ -484,7 +504,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.write(`data: [DONE]\n\n`);
       res.end();
     } catch (err: any) {
-      // إن حصل خطأ أثناء البث
+      // معالجة الأخطاء أثناء البث
       if (res.headersSent) {
         try {
           res.write(
