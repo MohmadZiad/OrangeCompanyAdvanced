@@ -12,7 +12,11 @@ import {
   readDocs,
   slugifyTitle,
 } from "./docs";
-import { computeProrata, buildScript } from "../client/src/lib/proRata";
+import {
+  computeProrata,
+  buildScript,
+  ymd,
+} from "../client/src/lib/proRata";
 
 // Rate limiting (ذاكرة مؤقتة بسيطة)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -48,13 +52,6 @@ const NAVIGATION_TRIGGERS = /\b(افتح|فتح|افتحي|open|show|اذهب|na
 
 const bilingual = (locale: "ar" | "en", ar: string, en: string) =>
   locale === "ar" ? `${ar}\n${en}` : `${en}\n${ar}`;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-const formatDMY = (date: Date) =>
-  `${String(date.getUTCDate()).padStart(2, "0")}-${String(
-    date.getUTCMonth() + 1
-  ).padStart(2, "0")}-${date.getUTCFullYear()}`;
 
 function normalizeDigits(input: string): string {
   return input
@@ -127,14 +124,12 @@ function parseProrataIntent(message: string): ProrataIntent | null {
     if (!match) return undefined;
     const value = Number.parseFloat(match[2]);
     return Number.isFinite(value) ? value : undefined;
-  };
+    };
 
   const grossValue = parseAmount(grossMatch);
   const monthlyValue = parseAmount(monthlyMatch);
 
-  if (grossValue == null && monthlyValue == null) {
-    return null;
-  }
+  if (grossValue == null && monthlyValue == null) return null;
 
   if (grossValue != null && (monthlyValue == null || (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))) {
     return { mode: "gross", activationDate, fullInvoiceGross: grossValue };
@@ -153,9 +148,7 @@ function parseVatIntent(message: string): VatIntent | null {
   const normalized = normalizeDigits(message);
   if (!VAT_KEYWORDS.test(normalized)) return null;
 
-  const numberMatches = Array.from(
-    normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g)
-  );
+  const numberMatches = Array.from(normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g));
   if (numberMatches.length === 0) return null;
 
   const amount = Number.parseFloat(numberMatches[0][1]);
@@ -295,6 +288,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const docUpdateNote = buildDocsUpdateNote(docUpdate, detectedLocale);
 
+      // --- Pro-rata intent ---
       const prorataIntent = latestUserMessage
         ? parseProrataIntent(latestUserMessage.content)
         : null;
@@ -311,40 +305,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const script = buildScript(result, detectedLocale);
 
-        const activationUTC = new Date(
-          result.cycleEndUTC.getTime() - result.proDays * DAY_MS
-        );
-        const period = `${formatDMY(activationUTC)} → ${formatDMY(
-          result.cycleEndUTC
-        )}`;
-        const coverageUntil = formatDMY(result.nextCycleEndUTC);
-        const invoiceDate = formatDMY(result.cycleEndUTC);
+        const period = `${ymd(result.cycleStartUTC)} → ${ymd(result.cycleEndUTC)}`;
+        const coverageUntil = ymd(result.nextCycleEndUTC);
+
         const message = buildAssistantMessage({
           locale: detectedLocale,
           content: combineText(detectedLocale, docUpdateNote, {
             ar: "تم حساب البروراتا.",
             en: "Pro-rata calculation ready.",
           }),
-            payload: {
-              kind: "prorata",
-              locale: detectedLocale,
-              data: {
-                period,
-                proDays: result.proDaysText,
-                percent: result.pctText,
-                monthlyNet: result.monthlyNetText,
-                prorataNet: result.prorataNetText,
-                invoiceDate,
-                coverageUntil,
-                script,
-                fullInvoiceGross: result.fullInvoiceGross,
-              },
+          payload: {
+            kind: "prorata",
+            locale: detectedLocale,
+            data: {
+              period,
+              proDays: `${result.proDays} / ${result.cycleDays}`,
+              percent: result.pctText,
+              monthlyNet: result.monthlyNetText,
+              prorataNet: result.prorataNetText,
+              invoiceDate: ymd(result.cycleEndUTC),
+              coverageUntil,
+              script,
+              fullInvoiceGross: result.fullInvoiceGross,
             },
+          },
         });
 
         return res.json({ message });
       }
 
+      // --- VAT intent ---
       const vatIntent = latestUserMessage
         ? parseVatIntent(latestUserMessage.content)
         : null;
@@ -371,15 +361,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const message = buildAssistantMessage({
           locale: detectedLocale,
-          content: combineText(detectedLocale, docUpdateNote, {
-            ar,
-            en,
-          }),
+          content: combineText(detectedLocale, docUpdateNote, { ar, en }),
         });
 
         return res.json({ message });
       }
 
+      // --- Doc navigation intent ---
       const docIntent = latestUserMessage
         ? detectDocNavigation(latestUserMessage.content, docs)
         : null;
@@ -406,6 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ message });
       }
 
+      // If only docs were updated and the user sent a long, non-question message, surface the update note
       if (
         docUpdateNote &&
         latestUserMessage &&

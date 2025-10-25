@@ -392,7 +392,8 @@ export function Chatbot() {
                       {chatMessages.map((msg) => {
                         const isUser = msg.role === "user";
                         const isErrorMessage =
-                          msg.role === "assistant" && /عذرًا|sorry/i.test(msg.content);
+                          msg.role === "assistant" &&
+                          /عذرًا|sorry/i.test(msg.content);
 
                         return (
                           <motion.div
@@ -400,7 +401,10 @@ export function Chatbot() {
                             initial={{ opacity: 0, y: 12 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.2, ease: "easeOut" }}
-                            className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
+                            className={cn(
+                              "flex w-full",
+                              isUser ? "justify-end" : "justify-start"
+                            )}
                           >
                             <div
                               className={cn(
@@ -413,24 +417,25 @@ export function Chatbot() {
                               data-testid={`chat-message-${msg.role}`}
                             >
                               <div className="space-y-2 text-sm leading-7">
-                                {parseMessageSegments(msg.content).map((segment, index) =>
-                                  segment.type === "link" ? (
-                                    <SmartLinkPill
-                                      key={`${msg.id}-link-${index}`}
-                                      linkId={segment.linkId}
-                                      className={cn(
-                                        "inline-flex",
-                                        isUser && "bg-white/90 text-foreground"
-                                      )}
-                                    />
-                                  ) : (
-                                    <span
-                                      key={`${msg.id}-text-${index}`}
-                                      className="block whitespace-pre-wrap break-words"
-                                    >
-                                      {segment.content}
-                                    </span>
-                                  )
+                                {parseMessageSegments(msg.content).map(
+                                  (segment, index) =>
+                                    segment.type === "link" ? (
+                                      <SmartLinkPill
+                                        key={`${msg.id}-link-${index}`}
+                                        linkId={segment.linkId}
+                                        className={cn(
+                                          "inline-flex",
+                                          isUser && "bg-white/90 text-foreground"
+                                        )}
+                                      />
+                                    ) : (
+                                      <span
+                                        key={`${msg.id}-text-${index}`}
+                                        className="block whitespace-pre-wrap break-words"
+                                      >
+                                        {segment.content}
+                                      </span>
+                                    )
                                 )}
                               </div>
 
@@ -449,7 +454,7 @@ export function Chatbot() {
                 </CardContent>
 
                 <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/80 px-8 py-6 backdrop-blur">
-                  {quickReplies.length > 0 && (
+                  {quickReplies.length > 0 && chatMessages.length === 0 && (
                     <div className="flex w-full flex-wrap items-center gap-2">
                       <span className="text-xs font-semibold text-muted-foreground">
                         {t("quickReplies", locale)}
@@ -485,152 +490,4 @@ export function Chatbot() {
                       e.preventDefault();
                       handleSend();
                     }}
-                    className="flex w-full items-center gap-3 rounded-full border border-white/70 bg-white px-4 py-2 shadow-[0_18px_40px_-30px_rgba(255,90,0,0.35)]"
-                  >
-                    <Input
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      placeholder={t("chatPlaceholder", locale)}
-                      disabled={isLoading}
-                      className="h-12 flex-1 border-0 bg-transparent px-1 text-sm focus-visible:ring-0"
-                      data-testid="input-chat-message"
-                    />
-                    <Button
-                      type="submit"
-                      size="icon"
-                      disabled={!message.trim() || isLoading}
-                      className="h-11 w-11 rounded-full bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_20px_50px_-30px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
-                      data-testid="button-send-message"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  </form>
-                </CardFooter>
-              </Card>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
-
-type MessageSegment =
-  | { type: "text"; content: string }
-  | { type: "link"; linkId: SmartLinkId };
-
-function parseMessageSegments(content: string): MessageSegment[] {
-  const regex = /\[\[link:([a-z0-9-]+)\]\]/gi;
-  const segments: MessageSegment[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({
-        type: "text",
-        content: content.slice(lastIndex, match.index),
-      });
-    }
-    const linkId = match[1]?.toLowerCase() as SmartLinkId;
-    segments.push({ type: "link", linkId });
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < content.length) {
-    segments.push({ type: "text", content: content.slice(lastIndex) });
-  }
-
-  if (segments.length === 0) {
-    return [{ type: "text", content }];
-  }
-
-  return segments;
-}
-
-type ProrataPayload = Extract<
-  NonNullable<ChatMessage["payload"]>,
-  { kind: "prorata" }
->;
-
-function ProrataSummaryCard({
-  data,
-  locale,
-}: {
-  data: ProrataPayload["data"];
-  locale: "en" | "ar";
-}) {
-  const isArabic = locale === "ar";
-  const label = (en: string, ar: string) => (isArabic ? ar : en);
-
-  return (
-    <div className="space-y-4 rounded-[1.8rem] border border-white/70 bg-gradient-to-br from-[#FFECD9]/80 via-[#FFE6CE]/85 to-[#FFD9B7]/85 p-5 text-sm text-foreground shadow-inner backdrop-blur">
-      <div className="grid gap-3 md:grid-cols-2">
-        <ProrataMetric
-          label={label("Period", "الفترة")}
-          value={data.period}
-        />
-        <ProrataMetric
-          label={label("Pro-days", "أيام البروراتا")}
-          value={`${data.proDays} · ${data.percent}`}
-        />
-        <ProrataMetric
-          label={label("Monthly (net)", "الاشتراك الشهري")}
-          value={data.monthlyNet}
-        />
-        <ProrataMetric
-          label={label("Pro-rata (net)", "قيمة البروراتا")}
-          value={data.prorataNet}
-        />
-        <ProrataMetric
-          label={label("Invoice date", "تاريخ الفاتورة")}
-          value={data.invoiceDate}
-        />
-        <ProrataMetric
-          label={label("Coverage until", "تغطية حتى")}
-          value={data.coverageUntil}
-        />
-      </div>
-      {typeof data.fullInvoiceGross === "number" && (
-        <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-xs font-medium">
-          {label("Full invoice (gross)", "الفاتورة الإجمالية")}: JD
-          {" "}
-          {data.fullInvoiceGross.toFixed(3)}
-        </div>
-      )}
-      <div className="space-y-3 rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 text-sm shadow-inner">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-          {label("Copy-ready script", "النص الجاهز للنسخ")}
-        </p>
-        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-6 text-foreground">
-          {data.script}
-        </pre>
-        <div className="flex justify-end">
-          <CopyButton
-            text={data.script}
-            label={label("Copy", "نسخ")}
-            variant="secondary"
-            className="rounded-full bg-gradient-to-r from-[#FF7A00] via-[#FF5400] to-[#FF3C00] px-4 py-2 text-white shadow-[0_18px_42px_-28px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ProrataMetric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 shadow-[0_16px_36px_-28px_rgba(0,0,0,0.18)]">
-      <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-2 font-semibold text-foreground">{value}</p>
-    </div>
-  );
-}
+                    className="flex w-full items-center gap-3 rounded-full border border-white/70 bg-white
