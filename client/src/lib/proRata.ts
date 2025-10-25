@@ -1,9 +1,8 @@
 // client/src/lib/proRata.ts
 // ============================================================================
 // Pro-rata billing utilities — UTC-safe, configurable anchorDay, bilingual AR/EN
-// Keeps backward compatibility with existing imports: ymd, computeProrata, buildScript
-// and adds: daysBetween, anchorCycle, prorate, firstAnchorAfterActivation,
-// cycleFromAnchor, computeActivationProrata, formatProrataOutput.
+// Public API kept stable: ymd, computeProrata, buildScript
+// Plus helpers: daysBetween, anchorCycle, prorate, etc.
 // ============================================================================
 
 /* =========================
@@ -25,7 +24,7 @@ export interface ProrationResult extends Cycle {
   value: number;
 }
 
-/** Backward-compat types used by your UI today */
+/** Backward-compat types used by the existing UI */
 export type ProrataInput =
   | {
       mode: "gross";
@@ -97,22 +96,27 @@ export const STR = {
  * UTC / Date helpers
  * =======================*/
 const DAY_MS = 24 * 60 * 60 * 1000;
+const LRM = "\u200E"; // Left-to-Right Mark to stabilise punctuation in RTL around numbers
 
 export function toUtcMidnight(d: Date): Date {
   return new Date(
     Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
   );
 }
+
 export function utcDate(y: number, mZeroBased: number, d: number): Date {
   return new Date(Date.UTC(y, mZeroBased, d));
 }
+
 export function lastDayOfMonth(y: number, mZeroBased: number): number {
   return new Date(Date.UTC(y, mZeroBased + 1, 0)).getUTCDate();
 }
+
 export function clampDay(y: number, mZeroBased: number, day: number): number {
   const last = lastDayOfMonth(y, mZeroBased);
   return Math.max(1, Math.min(day, last));
 }
+
 export function addMonthsUTC(
   base: Date,
   months: number,
@@ -127,18 +131,21 @@ export function addMonthsUTC(
   const targetDay = clampDay(targetYear, normalizedMonth, d);
   return utcDate(targetYear, normalizedMonth, targetDay);
 }
+
 export function ymd(d: Date): string {
   const y = d.getUTCFullYear();
   const m = `${d.getUTCMonth() + 1}`.padStart(2, "0");
   const day = `${d.getUTCDate()}`.padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+
 export function dmy(d: Date): string {
   const y = d.getUTCFullYear();
   const m = `${d.getUTCMonth() + 1}`.padStart(2, "0");
   const day = `${d.getUTCDate()}`.padStart(2, "0");
   return `${day}-${m}-${y}`;
 }
+
 /** whole-day diff after normalizing to UTC midnight */
 export function daysBetween(a: Date, b: Date): number {
   const A = toUtcMidnight(a).getTime();
@@ -182,10 +189,7 @@ export function fmt3(n: number): string {
   return n.toFixed(3);
 }
 
-/**
- * mode === "elapsed"   → usedDays = start → pivot
- * mode === "remaining" → usedDays = pivot → end
- */
+/** mode === "elapsed" → usedDays = start→pivot | "remaining" → pivot→end */
 export function prorate(
   monthly: number,
   pivot: Date,
@@ -214,16 +218,17 @@ export function firstAnchorAfterActivation(act: Date, anchorDay = 15): Date {
   const y = A.getUTCFullYear();
   const m = A.getUTCMonth();
   const thisAnchor = monthAnchorUTC(y, m, anchorDay);
-  if (A.getUTCDate() >= clampDay(y, m, anchorDay)) {
-    return addMonthsUTC(thisAnchor, 1, anchorDay);
-  }
-  return thisAnchor;
+  return A.getUTCDate() >= clampDay(y, m, anchorDay)
+    ? addMonthsUTC(thisAnchor, 1, anchorDay)
+    : thisAnchor;
 }
+
 export function cycleFromAnchor(end: Date, anchorDay = 15): Cycle {
   const E = toUtcMidnight(end);
   const prev = addMonthsUTC(E, -1, anchorDay);
   return { start: prev, end: E, days: Math.max(0, daysBetween(prev, E)) };
 }
+
 export function computeActivationProrata(
   monthly: number,
   activation: Date,
@@ -267,8 +272,6 @@ export function formatProrataOutput(
   }
 ): string {
   const L = STR[lang];
-
-  // في السكربت المختصر نعرض فترة البروراتا بتنسيق D-M-Y
   const startText = dmy(result.start);
   const endText = dmy(result.end);
   const pct = (result.ratio * 100).toFixed(2) + "%";
@@ -284,11 +287,9 @@ export function formatProrataOutput(
     ].join("\n");
   }
 
-  if (mode === "totals") {
-    return [monthlyLine, proLine].join("\n");
-  }
+  if (mode === "totals") return [monthlyLine, proLine].join("\n");
 
-  // VAT = 16% لصافي (monthly + prorata)
+  // VAT = 16% of (monthly + prorata) net
   const VAT_RATE = 0.16;
   const net = monthly + result.value;
   const vat = net * VAT_RATE;
@@ -325,7 +326,7 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
       ? input.fullInvoiceGross / (1 + vatRate)
       : input.monthlyNet;
 
-  // Use proper anchor math (not fixed 15 days)
+  // Proper anchor math (not fixed 15 days)
   const cyc = anchorCycle(activation, anchorDay);
   const proDays = Math.max(
     0,
@@ -358,38 +359,25 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
 }
 
 /* =========================
- * Script builder (full client-facing script)
+ * Script builder (single-paragraph client-facing script)
  * =======================*/
 export function buildScript(o: ProrataOutput, locale: Lang) {
-  // Activation date = end - proDays
+  // Activation date = end - proDays (UTC-safe)
   const activationUTC = new Date(o.cycleEndUTC.getTime() - o.proDays * DAY_MS);
   const start = dmy(activationUTC);
   const end = dmy(o.cycleEndUTC);
   const next = dmy(o.nextCycleEndUTC);
 
-  const monthly = `JD ${fmt3(o.monthlyNet)}`;
-  const prorata = `JD ${fmt3(o.prorataNet)}`;
-  const totalNet = `JD ${fmt3(o.monthlyNet + o.prorataNet)}`;
+  // Add LRM after numbers/currency to avoid colon flip in RTL blocks
+  const monthly = `JD ${fmt3(o.monthlyNet)}${LRM}`;
+  const prorata = `JD ${fmt3(o.prorataNet)}${LRM}`;
+  const totalNet = `JD ${fmt3(o.monthlyNet + o.prorataNet)}${LRM}`;
 
   if (locale === "ar") {
-    return [
-      `أوضّح لحضرتك أن الفاتورة صدرت بنسبة وتناسب من تاريخ التفعيل ${start} حتى يوم ${end}.`,
-      `وفي نفس الفاتورة تم احتساب قيمة الاشتراك الشهري مقدماً من ${end} حتى ${next}.`,
-      `• قيمة الاشتراك الشهري: ${monthly}`,
-      `• قيمة النسبة والتناسب حتى يوم 15: ${prorata}`,
-      `• قيمة الفاتورة الكليّة: ${totalNet}`,
-      `تاريخ إصدار الفاتورة: ${end}، وتغطي الخدمة مقدماً حتى ${next}.`,
-    ].join("\n");
+    return `أوضّح لحضرتك أن الفاتورة صدرت بنسبة وتناسب من تاريخ التفعيل ${start} حتى يوم ${end}، وفي نفس الفاتورة تم احتساب قيمة الاشتراك الشهري مقدماً من ${end} حتى ${next}. قيمة الاشتراك الشهري: ${monthly}، وقيمة النسبة والتناسب: ${prorata}، وبالتالي قيمة الفاتورة الكليّة (الصافي قبل الضريبة): ${totalNet}. تاريخ إصدار الفاتورة ${end} وتغطي الخدمة مقدماً حتى ${next}.`;
   }
 
-  return [
-    `Just to clarify, the invoice prorates the service from ${start} through ${end}.`,
-    `The same invoice bills the monthly subscription in advance from ${end} until ${next}.`,
-    `• Monthly subscription value: ${monthly}`,
-    `• Pro-rata amount up to day 15: ${prorata}`,
-    `• Total invoice amount: ${totalNet}`,
-    `Invoice issue date: ${end}, covering service in advance until ${next}.`,
-  ].join("\n");
+  return `Just to clarify, the invoice prorates the service from ${start} through ${end}, and on the same invoice bills the monthly subscription in advance from ${end} until ${next}. Monthly subscription: ${monthly}, pro-rata amount: ${prorata}, so the total (net before VAT) is ${totalNet}. The invoice is issued on ${end} and covers the service in advance until ${next}.`;
 }
 
 /* =========================
@@ -413,6 +401,7 @@ export function __exampleA() {
     totalNoVat: fmt3(monthly + proAmount), // "31.000"
   };
 }
+
 export function __exampleB() {
   const pivot = utcDate(2025, 0, 20);
   const resElapsed = prorate(100, pivot, 15, "elapsed");
@@ -435,10 +424,11 @@ export function __exampleB() {
     },
   };
 }
+
 export function __exampleC() {
-  const dLeap = utcDate(2024, 1, 10); // Feb 2024
+  const dLeap = utcDate(2024, 1, 10); // Feb 2024 (leap Feb = 29)
   const cycLeap = anchorCycle(dLeap, 31); // clamps to 29
-  const dNon = utcDate(2025, 1, 10); // Feb 2025
+  const dNon = utcDate(2025, 1, 10); // Feb 2025 (28)
   const cycNon = anchorCycle(dNon, 31); // clamps to 28
   return {
     leap: {

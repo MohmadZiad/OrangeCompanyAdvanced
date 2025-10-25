@@ -10,8 +10,11 @@ import {
   ymd,
   addMonthsUTC,
   formatProrataOutput,
+  buildScript, // ⬅️ نستخدمه للسكربت
+  fmt3, // ⬅️ تنسيق أرقام JD
   type Lang,
   type FormatMode,
+  type ProrataOutput,
 } from "@/lib/proRata";
 import { useAppStore } from "@/lib/store";
 
@@ -77,20 +80,41 @@ export default function ProRataCalculator() {
 
   /**
    * Text block (Script / Totals / VAT):
-   * - For Script view we want the period = Activation → First 15 (not cycle start).
-   * - So we override "start" with the activation date while keeping end from result.
+   * - في وضع "script" نستخدم buildScript لإظهار فقرة واحدة جاهزة.
+   * - في باقي الأوضاع نستعمل formatProrataOutput (قد تُرجع أسطر متعددة).
    */
-  const script = useMemo(() => {
+  const textBlock = useMemo(() => {
     if (!result || !activation) return "";
-    const scriptInput = {
+
+    if (view === "script") {
+      const o: ProrataOutput = {
+        cycleDays: result.days,
+        proDays: result.usedDays,
+        ratio: result.ratio,
+        prorataNet: result.value,
+        monthlyNet: monthly,
+        vatRate: 0.16,
+        cycleStartUTC: result.start,
+        cycleEndUTC: result.end,
+        nextCycleEndUTC: addMonthsUTC(result.end, 1, anchorDay),
+        pctText: `${(result.ratio * 100).toFixed(2)}%`,
+        prorataNetText: `JD ${fmt3(result.value)}`,
+        monthlyNetText: `JD ${fmt3(monthly)}`,
+        cycleRangeText: `${ymd(result.start)} \u2192 ${ymd(result.end)}`,
+        proDaysText: `${result.usedDays} / ${result.days}`,
+      };
+      return buildScript(o, lang);
+    }
+
+    // Totals / VAT
+    return formatProrataOutput(lang, view, monthly, {
       start: activation,
       end: result.end,
       usedDays: result.usedDays,
       days: result.days,
       ratio: result.ratio,
       value: result.value,
-    };
-    return formatProrataOutput(lang, view, monthly, scriptInput);
+    });
   }, [activation, result, lang, view, monthly]);
 
   // UI strings (bilingual)
@@ -298,12 +322,15 @@ export default function ProRataCalculator() {
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="rounded-[2.5rem] border border-white/60 bg-white/80 p-8 text-right text-base leading-loose text-foreground shadow-[0_28px_90px_-56px_rgba(255,120,50,0.7)]"
           >
-            <pre
-              className="whitespace-pre-wrap"
+            {/* مهم: لا نستخدم <pre> حتى لا يفرض سطور جديدة */}
+            <div
               dir={lang === "ar" ? "rtl" : "ltr"}
+              className={
+                view === "script" ? "whitespace-normal" : "whitespace-pre-line"
+              }
             >
-              {script}
-            </pre>
+              {textBlock}
+            </div>
           </motion.div>
         ) : (
           <motion.div

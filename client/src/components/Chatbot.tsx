@@ -43,7 +43,7 @@ export function Chatbot() {
   const { toast } = useToast();
   const isArabic = locale === "ar";
 
-  // Smart links recommendations
+  // Smart links recommendations (top-3 based on latest input)
   const recommendedSmartLinks = useMemo(() => {
     const latestInput = message.trim()
       ? message
@@ -51,17 +51,12 @@ export function Chatbot() {
           .reverse()
           .find((msg) => msg.role === "user" && msg.content.trim())?.content ??
         "";
-
     const matches = latestInput
-      ? getSmartLinkCandidates(latestInput).map((link) => link.id)
+      ? getSmartLinkCandidates(latestInput).map((l) => l.id)
       : [];
-
-    if (matches.length > 0) {
-      return Array.from(new Set(matches)).slice(0, 3);
-    }
-
+    if (matches.length > 0) return Array.from(new Set(matches)).slice(0, 3);
     return listSmartLinks()
-      .map((link) => link.id)
+      .map((l) => l.id)
       .slice(0, 3);
   }, [chatMessages, message]);
 
@@ -72,10 +67,8 @@ export function Chatbot() {
     }
   }, [chatMessages]);
 
-  // Cleanup any in-flight requests on unmount
-  useEffect(() => {
-    return () => abortRef.current?.abort();
-  }, []);
+  // Cleanup in-flight requests on unmount
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Fetch docs list
   const fetchDocs = useCallback(async () => {
@@ -83,9 +76,7 @@ export function Chatbot() {
       const response = await fetch("/api/docs");
       if (!response.ok) throw new Error("Failed to load docs");
       const data: { docs?: DocEntry[] } = await response.json();
-      if (Array.isArray(data.docs)) {
-        setDocs(data.docs);
-      }
+      if (Array.isArray(data.docs)) setDocs(data.docs);
     } catch {
       toast({
         title: locale === "ar" ? "تعذر تحميل المستندات" : "Docs unavailable",
@@ -118,16 +109,14 @@ export function Chatbot() {
 
   // Load docs when chat opens
   useEffect(() => {
-    if (isChatOpen) {
-      fetchDocs();
-    }
+    if (isChatOpen) fetchDocs();
   }, [isChatOpen, fetchDocs]);
 
   // Refresh docs on docs-update payloads
   useEffect(() => {
     const latestUpdate = [...chatMessages]
       .reverse()
-      .find((msg) => msg.payload?.kind === "docs-update");
+      .find((m) => m.payload?.kind === "docs-update");
     if (latestUpdate && !handledDocsUpdates.current.has(latestUpdate.id)) {
       handledDocsUpdates.current.add(latestUpdate.id);
       fetchDocs();
@@ -137,20 +126,19 @@ export function Chatbot() {
   // Handle navigate-doc payloads
   useEffect(() => {
     if (!hasSeededNavigate.current) {
-      chatMessages.forEach((msg) => {
-        if (msg.payload?.kind === "navigate-doc") {
-          handledNavigatePayloads.current.add(msg.id);
+      chatMessages.forEach((m) => {
+        if (m.payload?.kind === "navigate-doc") {
+          handledNavigatePayloads.current.add(m.id);
         }
       });
       hasSeededNavigate.current = true;
       return;
     }
-
-    chatMessages.forEach((msg) => {
-      if (msg.payload?.kind !== "navigate-doc") return;
-      if (handledNavigatePayloads.current.has(msg.id)) return;
-      handledNavigatePayloads.current.add(msg.id);
-      handleDocSelect(msg.payload.doc);
+    chatMessages.forEach((m) => {
+      if (m.payload?.kind !== "navigate-doc") return;
+      if (handledNavigatePayloads.current.has(m.id)) return;
+      handledNavigatePayloads.current.add(m.id);
+      handleDocSelect(m.payload.doc);
     });
   }, [chatMessages, handleDocSelect]);
 
@@ -170,7 +158,7 @@ export function Chatbot() {
     setMessage("");
     setIsLoading(true);
 
-    // Temp assistant message for streaming updates
+    // Temp assistant message for streaming
     const assistantMessageId = (Date.now() + 1).toString();
     const tempAssistantMessage: ChatMessage = {
       id: assistantMessageId,
@@ -180,7 +168,7 @@ export function Chatbot() {
     };
     addChatMessage(tempAssistantMessage);
 
-    // Abort any previous request
+    // Abort previous
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -239,9 +227,7 @@ export function Chatbot() {
           if (!line.startsWith("data: ")) continue;
           const data = line.slice(6).trim();
           if (!data) continue;
-          if (data === "[DONE]") {
-            break;
-          }
+          if (data === "[DONE]") break;
           try {
             const parsed = JSON.parse(data);
             if (parsed?.content) {
@@ -254,11 +240,9 @@ export function Chatbot() {
                 ),
               }));
             }
-            if (parsed?.error) {
-              throw new Error(parsed.error as string);
-            }
+            if (parsed?.error) throw new Error(parsed.error as string);
           } catch {
-            // ignore partial lines
+            /* ignore partial lines */
           }
         }
       }
@@ -292,9 +276,7 @@ export function Chatbot() {
     }
   };
 
-  const handleQuickReply = (replyText: string) => {
-    handleSend(replyText);
-  };
+  const handleQuickReply = (replyText: string) => handleSend(replyText);
 
   const closeChat = () => {
     setChatOpen(false);
@@ -445,7 +427,10 @@ export function Chatbot() {
                           <span className="mt-2 block text-xs opacity-70">
                             {new Date(msg.timestamp).toLocaleTimeString(
                               isArabic ? "ar-JO" : "en-US",
-                              { hour: "2-digit", minute: "2-digit" }
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }
                             )}
                           </span>
                         </motion.div>
@@ -542,7 +527,7 @@ export function Chatbot() {
   );
 }
 
-// ===== Helpers =====
+/* ===== Helpers ===== */
 
 type MessageSegment =
   | { type: "text"; content: string }
@@ -570,14 +555,10 @@ function parseMessageSegments(content: string): MessageSegment[] {
     segments.push({ type: "text", content: content.slice(lastIndex) });
   }
 
-  if (segments.length === 0) {
-    return [{ type: "text", content }];
-  }
-
-  return segments;
+  return segments.length === 0 ? [{ type: "text", content }] : segments;
 }
 
-// ===== Prorata widgets =====
+/* ===== Prorata widgets ===== */
 
 type ProrataPayload = Extract<
   NonNullable<ChatMessage["payload"]>,
@@ -619,19 +600,27 @@ function ProrataSummaryCard({
           value={data.coverageUntil}
         />
       </div>
+
       {typeof data.fullInvoiceGross === "number" && (
         <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-xs font-medium">
           {label("Full invoice (gross)", "الفاتورة الإجمالية")}: JD{" "}
           {data.fullInvoiceGross.toFixed(3)}
         </div>
       )}
+
       <div className="space-y-3 rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 text-sm shadow-inner">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
           {label("Copy-ready script", "النص الجاهز للنسخ")}
         </p>
-        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-6 text-foreground">
+
+        {/* ⬇️ عرض فقرة واحدة نظيفة بدل <pre> */}
+        <p
+          dir={isArabic ? "rtl" : "ltr"}
+          className="max-h-48 overflow-y-auto text-xs leading-6 whitespace-normal text-foreground"
+        >
           {data.script}
-        </pre>
+        </p>
+
         <div className="flex justify-end">
           <CopyButton
             text={data.script}
