@@ -11,15 +11,16 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppStore } from "@/lib/store";
 import { t, quickReplies } from "@/lib/i18n";
-import { MessageSquare, Send, X } from "lucide-react";
+import { MessageSquare, Send, X, Trash2, RotateCcw, LifeBuoy, Clock3 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import type { ChatMessage, DocEntry } from "@shared/schema";
-import { Badge } from "@/components/ui/badge";
+import type { ChatMessage, DocEntry, QuickReply, Locale } from "@shared/schema";
 import { SmartLinkPill } from "@/components/SmartLinkPill";
 import { CopyButton } from "@/components/CopyButton";
 import { useToast } from "@/hooks/use-toast";
 import { DocsNavigator } from "@/components/DocsNavigator";
+
+const SUPPORT_CONTACT = "mailto:support@orange.jo";
 import {
   getSmartLinkCandidates,
   listSmartLinks,
@@ -32,16 +33,52 @@ export function Chatbot() {
   const [docs, setDocs] = useState<DocEntry[]>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const handledNavigatePayloads = useRef<Set<string>>(new Set());
   const handledDocsUpdates = useRef<Set<string>>(new Set());
   const hasSeededNavigate = useRef(false);
 
-  const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
-    useAppStore();
+  const {
+    isChatOpen,
+    setChatOpen,
+    chatMessages,
+    addChatMessage,
+    locale,
+    clearChatMessages,
+  } = useAppStore();
 
   const { toast } = useToast();
   const isArabic = locale === "ar";
+
+  const latestUserMessage = useMemo(
+    () =>
+      [...chatMessages]
+        .reverse()
+        .find((msg) => msg.role === "user" && msg.content.trim()),
+    [chatMessages]
+  );
+
+  const contextualReplies = useMemo(
+    () => getContextualSuggestions(locale, latestUserMessage?.content ?? ""),
+    [locale, latestUserMessage]
+  );
+
+  const displayedQuickReplies = useMemo<QuickReply[]>(() => {
+    if (contextualReplies.length > 0) {
+      return contextualReplies.slice(0, 4);
+    }
+    return quickReplies.slice(0, 4);
+  }, [contextualReplies]);
+
+  const idleSuggestions = useMemo(
+    () => [
+      t("chatIdleOption1", locale),
+      t("chatIdleOption2", locale),
+      t("chatIdleOption3", locale),
+    ],
+    [locale]
+  );
 
   // Smart links recommendations
   const recommendedSmartLinks = useMemo(() => {
@@ -155,7 +192,7 @@ export function Chatbot() {
   }, [chatMessages, handleDocSelect]);
 
   // Send message (supports JSON or SSE streaming)
-  const handleSend = async (text?: string) => {
+  const handleSend = useCallback(async (text?: string) => {
     const messageText = text ?? message;
     if (!messageText.trim() || isLoading) return;
 
@@ -272,17 +309,32 @@ export function Chatbot() {
           ),
         }));
       }
-    } catch {
-      // Replace temp message with friendly error
+    } catch (error) {
+      const errorReason =
+        error instanceof Error && error.message
+          ? error.message
+          : locale === "ar"
+          ? "خطأ غير متوقع"
+          : "Unexpected error";
+      const messageCopy = t("chatErrorMessage", locale);
       useAppStore.setState((state) => ({
         chatMessages: state.chatMessages.map((msg) =>
           msg.id === assistantMessageId
             ? {
                 ...msg,
-                content:
-                  locale === "ar"
-                    ? "عذرًا، حدث خطأ أثناء المعالجة. حاول مرة أخرى."
-                    : "Sorry, I encountered an error. Please try again.",
+                content: `${messageCopy}\n${errorReason}`,
+                payload: {
+                  kind: "chat-error" as const,
+                  locale,
+                  data: {
+                    reason: errorReason,
+                    hint: t("supportPrompt", locale),
+                    retryLabel: t("retry", locale),
+                    supportLabel: t("contactSupport", locale),
+                    retryMessage: messageText,
+                    supportUrl: SUPPORT_CONTACT,
+                  },
+                },
               }
             : msg
         ),
@@ -290,11 +342,60 @@ export function Chatbot() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [message, isLoading, addChatMessage, chatMessages, locale]);
 
-  const handleQuickReply = (replyText: string) => {
-    handleSend(replyText);
-  };
+  const handleQuickReply = useCallback(
+    (replyText: string) => {
+      handleSend(replyText);
+    },
+    [handleSend]
+  );
+
+  const handleRetryFromError = useCallback(
+    (text?: string) => {
+      if (!text) return;
+      handleSend(text);
+    },
+    [handleSend]
+  );
+
+  const handleContactSupport = useCallback(() => {
+    window.open(SUPPORT_CONTACT, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const handleDeleteConversation = useCallback(() => {
+    const confirmation = window.confirm(t("clearChatConfirm", locale));
+    if (!confirmation) return;
+    clearChatMessages();
+    setMessage("");
+    toast({
+      title: locale === "ar" ? "تم حذف المحادثة" : "Conversation cleared",
+    });
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
+  }, [clearChatMessages, locale, toast]);
+
+  const handleNewConversation = useCallback(() => {
+    clearChatMessages();
+    setMessage("");
+    toast({
+      title:
+        locale === "ar"
+          ? "بدأت محادثة جديدة"
+          : "Started a fresh conversation",
+    });
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 120);
+  }, [clearChatMessages, locale, toast]);
+
+  const handleIdleSuggestion = useCallback(
+    (text: string) => {
+      handleSend(text);
+    },
+    [handleSend]
+  );
 
   const closeChat = () => {
     setChatOpen(false);
@@ -335,26 +436,26 @@ export function Chatbot() {
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
-            initial={{ x: isArabic ? -400 : 400, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: isArabic ? -400 : 400, opacity: 0 }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            initial={{ y: 60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 60, opacity: 0 }}
+            transition={{ type: "spring", damping: 22, stiffness: 180 }}
             className={cn(
-              "fixed top-0 bottom-0 z-50 w-full sm:w-[420px] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
-              isArabic ? "left-0" : "right-0"
+              "fixed bottom-4 z-50 w-[min(100%,420px)] sm:w-[420px] md:w-[480px]",
+              isArabic ? "left-4" : "right-4"
             )}
             style={{ direction: isArabic ? "rtl" : "ltr" }}
             data-testid="chat-panel"
           >
-            <Card className="flex h-full flex-col rounded-none border-0 bg-white/75 backdrop-blur-2xl sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10">
+            <Card className="flex h-[min(82vh,640px)] flex-col overflow-hidden rounded-[2.5rem] border border-white/50 bg-white/80 shadow-[0_40px_120px_-48px_rgba(0,0,0,0.6)] backdrop-blur-3xl dark:bg-white/10">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-white/50 pb-4 dark:border-white/10">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white">
+                <CardTitle className="flex items-center gap-3 text-lg">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-3xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_20px_40px_-24px_rgba(255,90,0,0.75)]">
                     <MessageSquare className="h-5 w-5" />
                   </span>
-                  {t("chatTitle", locale)}
+                  <span className="font-semibold tracking-tight">{t("chatTitle", locale)}</span>
                 </CardTitle>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 sm:gap-2">
                   <DocsNavigator
                     docs={docs}
                     locale={locale}
@@ -363,9 +464,37 @@ export function Chatbot() {
                   <Button
                     variant="ghost"
                     size="icon"
+                    onClick={handleContactSupport}
+                    className="hover-elevate"
+                    aria-label={t("contactSupport", locale)}
+                  >
+                    <LifeBuoy className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleNewConversation}
+                    className="hover-elevate"
+                    aria-label={t("newConversation", locale)}
+                  >
+                    <RotateCcw className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleDeleteConversation}
+                    className="hover-elevate text-destructive"
+                    aria-label={t("deleteConversation", locale)}
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={closeChat}
                     className="hover-elevate active-elevate-2"
                     data-testid="button-close-chat"
+                    aria-label={t("help", locale)}
                   >
                     <X className="h-5 w-5" />
                   </Button>
@@ -373,82 +502,140 @@ export function Chatbot() {
               </CardHeader>
 
               <CardContent className="flex-1 overflow-hidden p-0">
-                <ScrollArea className="h-full p-5" ref={scrollRef}>
-                  <div className="space-y-4">
+                <ScrollArea className="h-full px-5 py-6" ref={scrollRef}>
+                  <div className="space-y-6">
                     {chatMessages.length === 0 && (
-                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
-                        <MessageSquare className="mx-auto mb-4 h-12 w-12 opacity-70" />
-                        <p className="text-sm">
-                          {t("chatPlaceholder", locale)}
+                      <div className="rounded-[2rem] border border-dashed border-white/60 bg-white/70 px-6 py-10 text-center text-foreground backdrop-blur dark:bg-white/10">
+                        <MessageSquare className="mx-auto mb-5 h-12 w-12 text-primary/80" />
+                        <p className="text-lg font-semibold">
+                          {t("chatIdleTitle", locale)}
                         </p>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {t("chatIdleSubtitle", locale)}
+                        </p>
+                        <div
+                          className={cn(
+                            "mt-6 grid gap-3",
+                            isArabic ? "text-right" : "text-left"
+                          )}
+                        >
+                          {idleSuggestions.map((suggestion, index) => (
+                            <Button
+                              key={`idle-${index}`}
+                              type="button"
+                              onClick={() => handleIdleSuggestion(suggestion)}
+                              variant="outline"
+                              className="justify-between rounded-2xl border-white/70 bg-white/95 text-sm font-medium shadow-[0_18px_46px_-36px_rgba(0,0,0,0.25)] transition hover:-translate-y-0.5 hover:border-white"
+                            >
+                              <span className="truncate">{suggestion}</span>
+                              <Send className="h-4 w-4 opacity-70" />
+                            </Button>
+                          ))}
+                        </div>
                       </div>
                     )}
 
-                    {chatMessages.map((msg) => {
+                    {chatMessages.map((msg, index) => {
                       const isUser = msg.role === "user";
-                      const isErrorMessage =
-                        msg.role === "assistant" &&
-                        /عذرًا|sorry/i.test(msg.content);
+                      const isErrorMessage = msg.payload?.kind === "chat-error";
+                      const previousMessage = index > 0 ? chatMessages[index - 1] : undefined;
+                      const showDivider = shouldShowDivider(previousMessage, msg);
+                      const dividerLabel = showDivider
+                        ? formatConversationDivider(new Date(msg.timestamp), locale)
+                        : null;
 
                       return (
-                        <motion.div
-                          key={msg.id}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.2, ease: "easeOut" }}
-                          className={cn(
-                            "flex w-full",
-                            isUser ? "justify-end" : "justify-start"
+                        <div key={msg.id} className="space-y-3">
+                          {showDivider && dividerLabel && (
+                            <div className="flex justify-center">
+                              <span className="chat-day-divider">
+                                <Clock3 className="h-4 w-4" />
+                                {dividerLabel}
+                              </span>
+                            </div>
                           )}
-                        >
-                          <div
+                          <motion.div
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2, ease: "easeOut" }}
                             className={cn(
-                              "max-w-[80%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
-                              isUser
-                                ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
-                                : "bg-white/90 text-foreground backdrop-blur",
-                              isErrorMessage && "ring-2 ring-destructive/60"
+                              "flex w-full",
+                              isUser ? "justify-end" : "justify-start"
                             )}
-                            data-testid={`chat-message-${msg.role}`}
                           >
-                            <div className="space-y-2 text-sm leading-7">
-                              {parseMessageSegments(msg.content).map(
-                                (segment, index) =>
-                                  segment.type === "link" ? (
-                                    <SmartLinkPill
-                                      key={`${msg.id}-link-${index}`}
-                                      linkId={segment.linkId}
-                                      className={cn(
-                                        "inline-flex",
-                                        isUser && "bg-white/90 text-foreground"
-                                      )}
-                                    />
-                                  ) : (
-                                    <span
-                                      key={`${msg.id}-text-${index}`}
-                                      className="block whitespace-pre-wrap break-words"
+                            <div
+                              className={cn(
+                                "max-w-[82%] space-y-3 rounded-[2rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
+                                isUser
+                                  ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
+                                  : "bg-white/95 text-foreground backdrop-blur",
+                                isErrorMessage && "ring-2 ring-destructive/60"
+                              )}
+                              data-testid={`chat-message-${msg.role}`}
+                            >
+                              <div className="space-y-2 text-sm leading-7">
+                                {parseMessageSegments(msg.content).map(
+                                  (segment, idx) =>
+                                    segment.type === "link" ? (
+                                      <SmartLinkPill
+                                        key={`${msg.id}-link-${idx}`}
+                                        linkId={segment.linkId}
+                                        className={cn(
+                                          "inline-flex",
+                                          isUser && "bg-white/90 text-foreground"
+                                        )}
+                                      />
+                                    ) : (
+                                      <span
+                                        key={`${msg.id}-text-${idx}`}
+                                        className="block whitespace-pre-wrap break-words"
+                                      >
+                                        {segment.content}
+                                      </span>
+                                    )
+                                )}
+                              </div>
+
+                              {msg.payload?.kind === "prorata" && (
+                                <ProrataSummaryCard
+                                  data={msg.payload.data}
+                                  locale={msg.payload.locale}
+                                />
+                              )}
+
+                              {msg.payload?.kind === "chat-error" && (
+                                <div className="space-y-2 rounded-2xl bg-white/80 p-4 text-xs font-medium text-foreground shadow-inner">
+                                  <p>{msg.payload.data.hint}</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="secondary"
+                                      className="rounded-full bg-gradient-to-r from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_18px_40px_-26px_rgba(255,90,0,0.6)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
+                                      onClick={() => handleRetryFromError(msg.payload?.data.retryMessage)}
                                     >
-                                      {segment.content}
-                                    </span>
-                                  )
+                                      {msg.payload.data.retryLabel}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="rounded-full border-dashed border-primary/40"
+                                      onClick={handleContactSupport}
+                                    >
+                                      {msg.payload.data.supportLabel}
+                                    </Button>
+                                  </div>
+                                </div>
                               )}
                             </div>
 
-                            {msg.payload?.kind === "prorata" && (
-                              <ProrataSummaryCard
-                                data={msg.payload.data}
-                                locale={msg.payload.locale}
-                              />
-                            )}
-                          </div>
-
-                          <span className="mt-2 block text-xs opacity-70">
-                            {new Date(msg.timestamp).toLocaleTimeString(
-                              isArabic ? "ar-JO" : "en-US",
-                              { hour: "2-digit", minute: "2-digit" }
-                            )}
-                          </span>
-                        </motion.div>
+                            <span className="mt-2 block text-xs text-muted-foreground">
+                              {new Date(msg.timestamp).toLocaleTimeString(
+                                isArabic ? "ar-JO" : "en-US",
+                                { hour: "2-digit", minute: "2-digit" }
+                              )}
+                            </span>
+                          </motion.div>
+                        </div>
                       );
                     })}
 
@@ -458,8 +645,12 @@ export function Chatbot() {
                         animate={{ opacity: 1 }}
                         className="flex justify-start"
                       >
-                        <div className="flex items-center gap-3 rounded-3xl bg-white/80 px-4 py-3 text-foreground backdrop-blur dark:bg-white/10">
-                          <span className="loading-ring" />
+                        <div className="flex items-center gap-3 rounded-3xl bg-white/85 px-4 py-3 text-foreground backdrop-blur dark:bg-white/10">
+                          <span className="loading-dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                          </span>
                           <span className="text-sm">
                             {t("thinking", locale)}
                           </span>
@@ -470,34 +661,43 @@ export function Chatbot() {
                 </ScrollArea>
               </CardContent>
 
-              <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/80 px-5 py-4 backdrop-blur">
-                {/* Quick Replies */}
-                {quickReplies.length > 0 && (
-                  <div className="flex w-full flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      {t("quickReplies", locale)}
-                    </span>
-                    {quickReplies.map((reply) => (
-                      <Badge
-                        key={reply.id}
-                        variant="secondary"
-                        className="cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:-translate-y-1"
-                        onClick={() => handleQuickReply(reply.text[locale])}
-                        data-testid={`quick-reply-${reply.id}`}
-                      >
-                        {reply.text[locale]}
-                      </Badge>
-                    ))}
+              <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/85 px-5 py-4 backdrop-blur">
+                {displayedQuickReplies.length > 0 && (
+                  <div className="w-full space-y-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                      <span>{t("smartSuggestions", locale)}</span>
+                      <span className="text-[10px] font-normal normal-case tracking-normal text-muted-foreground/80">
+                        {t("smartSuggestionsHint", locale)}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {displayedQuickReplies.map((reply) => (
+                        <button
+                          key={reply.id}
+                          type="button"
+                          onClick={() => handleQuickReply(reply.text[locale])}
+                          className={cn(
+                            "chat-suggestion-card text-start",
+                            isArabic && "items-end text-right"
+                          )}
+                          data-testid={`quick-reply-${reply.id}`}
+                        >
+                          <span className="text-sm font-semibold leading-5 text-foreground">
+                            {reply.text[locale]}
+                          </span>
+                          <span className="text-[10px] font-medium uppercase tracking-[0.3em] text-muted-foreground/80">
+                            {t("quickReplies", locale)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                {/* Recommended Smart Links */}
                 {recommendedSmartLinks.length > 0 && (
                   <div className="w-full">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                      {locale === "ar"
-                        ? "روابط أورنج"
-                        : "Official Orange links"}
+                      {locale === "ar" ? "روابط أورنج" : "Official Orange links"}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {recommendedSmartLinks.map((linkId) => (
@@ -507,7 +707,6 @@ export function Chatbot() {
                   </div>
                 )}
 
-                {/* Input */}
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -516,6 +715,7 @@ export function Chatbot() {
                   className="flex w-full items-center gap-3 rounded-full border border-white/70 bg-white px-4 py-2 shadow-[0_18px_40px_-30px_rgba(255,90,0,0.35)]"
                 >
                   <Input
+                    ref={inputRef}
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     placeholder={t("chatPlaceholder", locale)}
@@ -575,6 +775,118 @@ function parseMessageSegments(content: string): MessageSegment[] {
   }
 
   return segments;
+}
+
+function shouldShowDivider(
+  previous: ChatMessage | undefined,
+  current: ChatMessage
+): boolean {
+  if (!previous) return true;
+  const prevDate = new Date(previous.timestamp);
+  const currentDate = new Date(current.timestamp);
+  return !isSameDay(prevDate, currentDate);
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
+function formatConversationDivider(date: Date, locale: Locale): string {
+  const timeFormatter = new Intl.DateTimeFormat(locale === "ar" ? "ar-JO" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const midnight = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const today = midnight(new Date());
+  const target = midnight(date);
+  const diffDays = Math.round((today.getTime() - target.getTime()) / (24 * 60 * 60 * 1000));
+
+  if (diffDays === 0) {
+    return `${t("chatTimestampToday", locale)} – ${timeFormatter.format(date)}`;
+  }
+  if (diffDays === 1) {
+    return `${t("chatTimestampYesterday", locale)} – ${timeFormatter.format(date)}`;
+  }
+  const dateFormatter = new Intl.DateTimeFormat(locale === "ar" ? "ar-JO" : "en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+  return `${dateFormatter.format(date)} ${t("chatTimestampAt", locale)} ${timeFormatter.format(date)}`;
+}
+
+function getContextualSuggestions(_locale: Locale, raw: string): QuickReply[] {
+  const text = raw.trim().toLowerCase();
+  if (!text) return [];
+
+  const suggestions: QuickReply[] = [];
+  const used = new Set<string>();
+  const push = (id: string, en: string, ar: string) => {
+    if (used.has(id)) return;
+    used.add(id);
+    suggestions.push({ id, text: { en, ar } });
+  };
+
+  if (/pro.?rata|pro-rata|prorata|بروراتا|تقسيم نسبي/.test(text)) {
+    push(
+      "pro-example",
+      "Calculate a practical pro-rata example",
+      "احسب مثال بروراتا عملي"
+    );
+    push(
+      "pro-formula",
+      "Explain the pro-rata formula again",
+      "اشرح صيغة البروراتا مجددًا"
+    );
+    push(
+      "pro-script",
+      "Generate a bilingual billing script",
+      "أنشئ نص فوترة ثنائي اللغة"
+    );
+  }
+
+  if (/invoice|فاتورة|billing|bill/.test(text)) {
+    push(
+      "invoice-flow",
+      "Outline the monthly invoice timeline",
+      "لخص مخطط الفاتورة الشهرية"
+    );
+    push(
+      "invoice-vat",
+      "Show invoice totals with VAT",
+      "أظهر الإجمالي مع الضريبة"
+    );
+  }
+
+  if (/(?:vat|tax|ضريبة)/.test(text)) {
+    push(
+      "vat-breakdown",
+      "Break down VAT for my total",
+      "قسّم الضريبة لقيمتي"
+    );
+  }
+
+  if (/calculator|حاسبة|price/.test(text)) {
+    push(
+      "calc-help",
+      "Guide me through the price calculator",
+      "أرشدني خلال حاسبة الأسعار"
+    );
+  }
+
+  if (suggestions.length === 0 && text.length > 0) {
+    push(
+      "follow-up",
+      "Suggest another tool I can use",
+      "اقترح أداة أخرى أستطيع استخدامها"
+    );
+  }
+
+  return suggestions;
 }
 
 // ===== Prorata widgets =====
