@@ -6,7 +6,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { Chatbot } from "@/components/Chatbot";
 import { OrangeCalculator } from "@/components/OrangeCalculator";
-import { ProRataCalculator } from "@/components/ProRataCalculator";
+import ProRataCalculator from "@/components/ProRataCalculator";
 import { SummaryPanel, SummaryPanelMobile } from "@/components/SummaryPanel";
 import { Button } from "@/components/ui/button";
 import { MessageSquare } from "lucide-react";

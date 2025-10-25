@@ -1,4 +1,3 @@
-// server/routes.ts
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { openai, SYSTEM_PROMPT } from "./openai";
@@ -7,16 +6,8 @@ import {
   type ChatMessage,
   type DocEntry,
 } from "@shared/schema";
-import {
-  extractAndStoreDocs,
-  readDocs,
-  slugifyTitle,
-} from "./docs";
-import {
-  computeProrata,
-  buildScript,
-  ymd,
-} from "../client/src/lib/proRata";
+import { extractAndStoreDocs, readDocs, slugifyTitle } from "./docs";
+import { computeProrata, buildScript, ymd } from "../client/src/lib/proRata";
 
 // Rate limiting (ذاكرة مؤقتة بسيطة)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -48,7 +39,9 @@ const ARABIC_DIGIT_MAP: Record<string, string> = {
   "٩": "9",
 };
 
-const NAVIGATION_TRIGGERS = /\b(افتح|فتح|افتحي|open|show|اذهب|navigate|شغل|عرض|روح)\b/iu;
+// ملاحظة: يتطلب علمتا i/u دعم ES2018+. اضبط tsconfig: "target": "es2018" أو أعلى.
+const NAVIGATION_TRIGGERS =
+  /\b(افتح|فتح|افتحي|open|show|اذهب|navigate|شغل|عرض|روح)\b/iu;
 
 const bilingual = (locale: "ar" | "en", ar: string, en: string) =>
   locale === "ar" ? `${ar}\n${en}` : `${en}\n${ar}`;
@@ -73,11 +66,15 @@ function buildDocsUpdateNote(
 
   if (added.length) {
     arSegments.push(`إضافة ${added.length} عنصر جديد`);
-    enSegments.push(`added ${added.length} new title${added.length > 1 ? "s" : ""}`);
+    enSegments.push(
+      `added ${added.length} new title${added.length > 1 ? "s" : ""}`
+    );
   }
   if (updated.length) {
     arSegments.push(`تحديث ${updated.length} عنصر`);
-    enSegments.push(`updated ${updated.length} title${updated.length > 1 ? "s" : ""}`);
+    enSegments.push(
+      `updated ${updated.length} title${updated.length > 1 ? "s" : ""}`
+    );
   }
 
   const ar = `تم تحديث قائمة المستندات (${arSegments.join(" و ")}).`;
@@ -124,14 +121,18 @@ function parseProrataIntent(message: string): ProrataIntent | null {
     if (!match) return undefined;
     const value = Number.parseFloat(match[2]);
     return Number.isFinite(value) ? value : undefined;
-    };
+  };
 
   const grossValue = parseAmount(grossMatch);
   const monthlyValue = parseAmount(monthlyMatch);
 
   if (grossValue == null && monthlyValue == null) return null;
 
-  if (grossValue != null && (monthlyValue == null || (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))) {
+  if (
+    grossValue != null &&
+    (monthlyValue == null ||
+      (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))
+  ) {
     return { mode: "gross", activationDate, fullInvoiceGross: grossValue };
   }
 
@@ -142,13 +143,16 @@ function parseProrataIntent(message: string): ProrataIntent | null {
   return null;
 }
 
-const VAT_KEYWORDS = /(?:ضريبة|شامل|vat|ضريبه|tax|مع الضريبة|includes vat|include vat|with vat)/i;
+const VAT_KEYWORDS =
+  /(?:ضريبة|شامل|vat|ضريبه|tax|مع الضريبة|includes vat|include vat|with vat)/i;
 
 function parseVatIntent(message: string): VatIntent | null {
   const normalized = normalizeDigits(message);
   if (!VAT_KEYWORDS.test(normalized)) return null;
 
-  const numberMatches = Array.from(normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g));
+  const numberMatches = Array.from(
+    normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g)
+  );
   if (numberMatches.length === 0) return null;
 
   const amount = Number.parseFloat(numberMatches[0][1]);
@@ -274,7 +278,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const detectedLocale =
         requestedLocale ??
-        (latestUserMessage && /[\p{Script=Arabic}]/u.test(latestUserMessage.content)
+        (latestUserMessage &&
+        /[\p{Script=Arabic}]/u.test(latestUserMessage.content)
           ? "ar"
           : "en");
 
@@ -282,9 +287,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? await extractAndStoreDocs(latestUserMessage.content)
         : { added: [], updated: [] };
 
-      const docs = docUpdate.added.length || docUpdate.updated.length
-        ? await readDocs()
-        : docsBefore;
+      const docs =
+        docUpdate.added.length || docUpdate.updated.length
+          ? await readDocs()
+          : docsBefore;
 
       const docUpdateNote = buildDocsUpdateNote(docUpdate, detectedLocale);
 
@@ -305,7 +311,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const script = buildScript(result, detectedLocale);
 
-        const period = `${ymd(result.cycleStartUTC)} → ${ymd(result.cycleEndUTC)}`;
+        const period = `${ymd(result.cycleStartUTC)} → ${ymd(
+          result.cycleEndUTC
+        )}`;
         const coverageUntil = ymd(result.nextCycleEndUTC);
 
         const message = buildAssistantMessage({
@@ -355,9 +363,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )} = JD ${totalDue.toFixed(3)}.`;
         const en = `With 16% VAT, each unit is JD ${unitTotal.toFixed(
           3
-        )} (VAT: JD ${unitVat.toFixed(3)}).\nTotal for ${vatIntent.quantity}: net JD ${subtotal.toFixed(
+        )} (VAT: JD ${unitVat.toFixed(3)}).\nTotal for ${
+          vatIntent.quantity
+        }: net JD ${subtotal.toFixed(3)} + VAT JD ${totalVat.toFixed(
           3
-        )} + VAT JD ${totalVat.toFixed(3)} = JD ${totalDue.toFixed(3)}.`;
+        )} = JD ${totalDue.toFixed(3)}.`;
 
         const message = buildAssistantMessage({
           locale: detectedLocale,
@@ -395,12 +405,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // If only docs were updated and the user sent a long, non-question message, surface the update note
-      if (
-        docUpdateNote &&
-        latestUserMessage &&
-        !prorataIntent &&
-        !docIntent
-      ) {
+      if (docUpdateNote && latestUserMessage) {
         const lineCount = latestUserMessage.content
           .split(/\n+/)
           .map((line) => line.trim())
@@ -438,7 +443,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: m.timestamp,
       }));
 
-      const composedMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      const composedMessages: {
+        role: "system" | "user" | "assistant";
+        content: string;
+      }[] = [
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "system",
@@ -455,12 +463,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stream = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: composedMessages,
-        max_completion_tokens: 1024,
+        max_tokens: 1024, // ✅ صح مع chat.completions
         stream: true,
       });
 
       if (docUpdateNote) {
-        res.write(`data: ${JSON.stringify({ content: `${docUpdateNote}\n` })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({ content: `${docUpdateNote}\n` })}\n\n`
+        );
       }
 
       for await (const chunk of stream) {

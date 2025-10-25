@@ -32,8 +32,6 @@ app.use((req, res, next) => {
   const path = req.path;
   let capturedJsonResponse: unknown | undefined;
 
-  // Response.json signature takes a single body argument.
-  // Bind and call it safely (fixes TS spread error).
   const originalJson = res.json.bind(res) as (body?: any) => typeof res;
 
   (res as any).json = (bodyJson?: any) => {
@@ -62,6 +60,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // ✅ registerRoutes ترجع Promise<Server>، لذلك لازم await
   const server = await registerRoutes(app);
 
   // Central error handler

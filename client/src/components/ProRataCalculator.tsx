@@ -1,353 +1,309 @@
+// client/src/components/ProRataCalculator.tsx
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CalendarDays, Coins, Percent } from "lucide-react";
+import { Percent } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  prorate,
+  ymd,
+  addMonthsUTC,
+  formatProrataOutput,
+  type Lang,
+  type FormatMode,
+} from "@/lib/proRata";
+import { useAppStore } from "@/lib/store";
 
-const DAY = 24 * 60 * 60 * 1000;
-
-interface ComputedResult {
-  activation: Date;
-  nextInvoice: Date;
-  previousInvoice: Date;
-  coverageEnd: Date;
-  cycleDays: number;
-  usedDays: number;
-  percentage: number;
-  invoiceValue: number;
-  proratedValue: number;
-  explanation: string;
-}
-
-const arabicDateFormatter = new Intl.DateTimeFormat("ar-JO", {
-  day: "2-digit",
-  month: "long",
-  year: "numeric",
-});
-
-const arabicShortFormatter = new Intl.DateTimeFormat("ar-JO", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
-const currencyFormatter = new Intl.NumberFormat("ar-JO", {
-  style: "currency",
-  currency: "JOD",
-  minimumFractionDigits: 3,
-});
-
-function parseISODate(value: string) {
-  if (!value) return null;
-  const [y, m, d] = value.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(Date.UTC(y, m - 1, d));
-}
-
-function nextAnchorDate(date: Date) {
-  const sameMonthAnchor = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 15)
-  );
-  if (date.getTime() < sameMonthAnchor.getTime()) {
-    return sameMonthAnchor;
-  }
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 15)
+/** Small metric pill used in the summary grid */
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-[#FFF6EF] p-4 shadow-inner">
+      <p className="text-xs text-[#FF8A4C]">{label}</p>
+      <p className="mt-2 font-mono text-base font-semibold text-foreground">
+        {value}
+      </p>
+    </div>
   );
 }
 
-function previousAnchorDate(date: Date) {
-  const currentAnchor = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 15)
-  );
-  if (date.getTime() <= currentAnchor.getTime()) {
-    return new Date(
-      Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 15)
-    );
-  }
-  return currentAnchor;
-}
+/**
+ * ProRataCalculator
+ * - Computes pro-rata from Activation → first anchor (day 15).
+ * - Shows 3 views: Script, Totals, VAT.
+ * - Bilingual based on global store locale (ar/en).
+ */
+export default function ProRataCalculator() {
+  const { locale } = useAppStore();
+  const lang = (locale === "ar" ? "ar" : "en") as Lang;
 
-function formatDate(date: Date, variant: "full" | "short" = "full") {
-  return variant === "full"
-    ? arabicDateFormatter.format(date)
-    : arabicShortFormatter.format(date);
-}
+  const [monthlyRaw, setMonthlyRaw] = useState("");
+  const [dateRaw, setDateRaw] = useState("");
+  const [view, setView] = useState<FormatMode>("script");
 
-function buildExplanation(result: ComputedResult) {
-  const activationText = formatDate(result.activation);
-  const invoiceText = formatDate(result.nextInvoice);
-  const coverageEndText = formatDate(result.coverageEnd);
-  const nextCycleStart = formatDate(result.nextInvoice, "short");
-  const prevAnchorText = formatDate(result.previousInvoice, "short");
-  const percentageText = result.percentage.toFixed(2);
-  const proratedText = currencyFormatter.format(result.proratedValue);
-  const invoiceValueText = currencyFormatter.format(result.invoiceValue);
-  return `تم تفعيل الاشتراك بتاريخ ${activationText}، وسيتم إصدار الفاتورة القادمة في ${invoiceText}. يغطي هذا الاحتساب الفترة من ${activationText} حتى ${coverageEndText}، أي ${result.usedDays} يوم من أصل ${result.cycleDays} يوم (${percentageText}٪ من الدورة بين ${prevAnchorText} و${nextCycleStart}). بناءً على قيمة الفاتورة الكاملة (${invoiceValueText})، فإن قيمة النسبة والتناسب المستحقة هي ${proratedText}.`;
-}
+  // Orange bills on a fixed anchor day = 15
+  const anchorDay = 15;
 
-function calculateResult(invoiceValueRaw: string, activationRaw: string) {
-  const invoiceValue = invoiceValueRaw.trim() === "" ? NaN : Number(invoiceValueRaw);
-  const activationDate = parseISODate(activationRaw);
+  // Parse monthly value (accepts up to 3 decimals)
+  const monthly = useMemo(() => {
+    const n = Number(monthlyRaw);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }, [monthlyRaw]);
 
-  if (!activationDate || !Number.isFinite(invoiceValue)) {
-    return null;
-  }
+  // Parse activation date (YYYY-MM-DD) → UTC midnight
+  const activation = useMemo(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return null;
+    const [y, m, d] = dateRaw.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }, [dateRaw]);
 
-  const nextInvoice = nextAnchorDate(activationDate);
-  const previousInvoice = previousAnchorDate(activationDate);
-  const cycleDays = Math.max(
-    1,
-    Math.round((nextInvoice.getTime() - previousInvoice.getTime()) / DAY)
-  );
-  const rawUsedDays = Math.ceil(
-    Math.max(0, nextInvoice.getTime() - activationDate.getTime()) / DAY
-  );
-  const usedDays = Math.min(cycleDays, rawUsedDays);
-  const percentage = Math.min(100, Math.max(0, (usedDays / cycleDays) * 100));
-  const proratedValue = (invoiceValue * percentage) / 100;
-  const coverageEnd = new Date(nextInvoice.getTime() - DAY);
+  /**
+   * Core proration:
+   * - We want remaining days in the cycle that contains the activation date,
+   *   where cycle end = first 15th *after* activation.
+   */
+  const result = useMemo(() => {
+    if (!activation || monthly <= 0) return null;
+    return prorate(monthly, activation, anchorDay, "remaining");
+  }, [activation, monthly]);
 
-  const explanation = buildExplanation({
-    activation: activationDate,
-    nextInvoice,
-    previousInvoice,
-    coverageEnd,
-    cycleDays,
-    usedDays,
-    percentage,
-    invoiceValue,
-    proratedValue,
-    explanation: "",
-  });
+  // Coverage end: the next 15th after the invoice date (advance billing coverage)
+  const coverageUntil = useMemo(() => {
+    if (!result) return null;
+    return addMonthsUTC(result.end, 1, anchorDay);
+  }, [result]);
 
-  return {
-    activation: activationDate,
-    nextInvoice,
-    previousInvoice,
-    coverageEnd,
-    cycleDays,
-    usedDays,
-    percentage,
-    invoiceValue,
-    proratedValue,
-    explanation,
-  } satisfies ComputedResult;
-}
+  const percent = result ? (result.ratio * 100).toFixed(2) : "0.00";
 
-export function ProRataCalculator() {
-  const [invoiceValue, setInvoiceValue] = useState("");
-  const [activationDate, setActivationDate] = useState("");
+  /**
+   * Text block (Script / Totals / VAT):
+   * - For Script view we want the period = Activation → First 15 (not cycle start).
+   * - So we override "start" with the activation date while keeping end from result.
+   */
+  const script = useMemo(() => {
+    if (!result || !activation) return "";
+    const scriptInput = {
+      start: activation,
+      end: result.end,
+      usedDays: result.usedDays,
+      days: result.days,
+      ratio: result.ratio,
+      value: result.value,
+    };
+    return formatProrataOutput(lang, view, monthly, scriptInput);
+  }, [activation, result, lang, view, monthly]);
 
-  const result = useMemo(
-    () => calculateResult(invoiceValue, activationDate),
-    [invoiceValue, activationDate]
-  );
-
-  const percentageDisplay = result ? result.percentage.toFixed(2) : "0.00";
+  // UI strings (bilingual)
+  const L = {
+    title: lang === "ar" ? "حاسبة التقسيم النسبي" : "Pro-Rata Calculator",
+    tip:
+      lang === "ar"
+        ? "تتم الفوترة دائمًا في يوم 15 من كل شهر."
+        : "Invoices are always issued on day 15 of each month.",
+    monthly: lang === "ar" ? "قيمة الاشتراك الشهري" : "Monthly value",
+    actDate: lang === "ar" ? "تاريخ التفعيل" : "Activation date",
+    usedPct: lang === "ar" ? "النسبة المستخدمة" : "Used %",
+    progress: lang === "ar" ? "تقدم الدورة" : "Cycle progress",
+    period: lang === "ar" ? "فترة البروراتا" : "Pro-rata period",
+    counted: lang === "ar" ? "الأيام المحتسبة" : "Counted days",
+    proAmount: lang === "ar" ? "قيمة البروراتا" : "Pro-rata amount",
+    monthlyLbl: lang === "ar" ? "الاشتراك الشهري" : "Monthly",
+    nextInv: lang === "ar" ? "تاريخ إصدار الفاتورة" : "Invoice date",
+    coverage: lang === "ar" ? "تغطية حتى" : "Coverage until",
+    viewLbl: lang === "ar" ? "طريقة العرض" : "View",
+    mScript: lang === "ar" ? "السكربت" : "Script",
+    mTotals: lang === "ar" ? "الإجمالي" : "Totals",
+    mVat: lang === "ar" ? "الضريبة" : "VAT",
+    badge: lang === "ar" ? "حساب حتى يوم 15 القادم" : "Prorate to next day 15",
+    empty:
+      lang === "ar"
+        ? "أدخل القيم لعرض التفاصيل."
+        : "Enter values to see details.",
+    placeholder:
+      lang === "ar"
+        ? "سيظهر هنا السكربت أو الإجمالي أو الضريبة بعد إدخال البيانات."
+        : "Script / totals / VAT text will appear here once you enter data.",
+  };
 
   return (
     <section
-      dir="rtl"
+      dir={lang === "ar" ? "rtl" : "ltr"}
       className="space-y-8 rounded-[3rem] border border-white/60 bg-gradient-to-br from-[#FFF2E4]/90 via-[#FFE5D1]/90 to-[#FFD7BA]/85 p-8 shadow-[0_40px_120px_-60px_rgba(255,120,50,0.8)] backdrop-blur-xl"
     >
+      {/* Header */}
       <header className="flex flex-col gap-3 text-right">
         <div className="inline-flex items-center gap-3 self-end rounded-[2rem] bg-white/70 px-5 py-2 text-sm font-medium text-primary shadow-inner">
           <Percent className="h-4 w-4" />
-          <span>حساب النسبة والتناسب حتى يوم 15</span>
+          <span>{L.badge}</span>
         </div>
         <h2 className="text-2xl font-semibold text-foreground sm:text-3xl">
-          نسبة وتناسب فاتورة واحدة بطريقة مبسطة
+          {L.title}
         </h2>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          أدخل قيمة الفاتورة الكاملة وتاريخ تفعيل الخدمة ليحسب النظام الفترة المغطاة حتى أقرب يوم 15، ونسبة الاستخدام، والمبلغ المستحق تلقائيًا.
-        </p>
+        <p className="max-w-3xl text-sm text-muted-foreground">{L.tip}</p>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-        <motion.div
-          layout
-          className="order-2 flex flex-col gap-6 rounded-[2.5rem] border border-white/70 bg-white/80 p-8 shadow-[0_30px_90px_-50px_rgba(255,120,50,0.75)] transition-shadow duration-300 lg:order-1"
-        >
-          <div className="flex flex-col gap-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="flex h-14 w-14 items-center justify-center rounded-[1.75rem] bg-gradient-to-br from-[#FF9A3D] via-[#FF7A3D] to-[#FF5E3D] text-white shadow-[0_24px_60px_-36px_rgba(255,122,0,0.85)]">
-                  <Percent className="h-6 w-6" />
-                </span>
-                <div>
-                  <p className="text-xs text-muted-foreground">النسبة المستخدمة</p>
-                  <p className="text-3xl font-semibold text-foreground">
-                    {percentageDisplay}%
-                  </p>
-                </div>
-              </div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="cursor-help text-sm text-primary underline decoration-dotted underline-offset-4">
-                    ما معنى النسبة؟
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-right text-sm">
-                  هذه النسبة توضح الجزء المستهلك من الدورة الحالية بين يوم 15 السابق ويوم 15 القادم.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>تقدّم الدورة</span>
-                <span>{percentageDisplay}%</span>
-              </div>
-              <div className="relative h-3 w-full overflow-hidden rounded-full bg-[#FFEFE2]">
-                <motion.div
-                  key={percentageDisplay}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${result ? result.percentage : 0}%` }}
-                  transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-                  className="absolute inset-y-0 right-0 rounded-full bg-gradient-to-l from-[#FF5E3D] via-[#FF7A3D] to-[#FFB36B] shadow-[0_16px_44px_-28px_rgba(255,120,60,0.9)]"
-                />
+        {/* Summary / meters */}
+        <div className="order-2 flex flex-col gap-6 rounded-[2.5rem] border border-white/70 bg-white/80 p-8 shadow-[0_30px_90px_-50px_rgba(255,120,50,0.75)] lg:order-1">
+          {/* Top row: percentage + view switch */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-14 w-14 items-center justify-center rounded-[1.75rem] bg-gradient-to-br from-[#FF9A3D] via-[#FF7A3D] to-[#FF5E3D] text-white shadow-[0_24px_60px_-36px_rgba(255,122,0,0.85)]">
+                <Percent className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="text-xs text-muted-foreground">{L.usedPct}</p>
+                <p className="text-3xl font-semibold text-foreground">
+                  {percent}%
+                </p>
               </div>
             </div>
 
-            <AnimatePresence mode="wait">
-              {result ? (
-                <motion.div
-                  key={result.explanation}
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                  className="grid gap-4 text-sm text-muted-foreground sm:grid-cols-2"
-                >
-                  <div className="rounded-2xl bg-[#FFF6EF] p-4 shadow-inner">
-                    <p className="text-xs text-[#FF8A4C]">تاريخ الفاتورة القادم</p>
-                    <p className="mt-2 text-base font-semibold text-foreground">
-                      {formatDate(result.nextInvoice)}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-[#FFF6EF] p-4 shadow-inner">
-                    <p className="text-xs text-[#FF8A4C]">فترة التغطية</p>
-                    <p className="mt-2 text-base font-semibold text-foreground">
-                      {formatDate(result.activation, "short")} – {formatDate(result.coverageEnd, "short")}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-[#FFF6EF] p-4 shadow-inner">
-                    <p className="text-xs text-[#FF8A4C]">عدد الأيام المحتسبة</p>
-                    <p className="mt-2 text-base font-semibold text-foreground">
-                      {result.usedDays} يوم من {result.cycleDays}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-[#FFF6EF] p-4 shadow-inner">
-                    <p className="text-xs text-[#FF8A4C]">المبلغ المستحق</p>
-                    <p className="mt-2 text-base font-semibold text-foreground">
-                      {currencyFormatter.format(result.proratedValue)}
-                    </p>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="empty"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -12 }}
-                  transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                  className="rounded-2xl bg-[#FFF6EF] p-6 text-sm text-muted-foreground shadow-inner"
-                >
-                  ابدأ بإدخال قيمة الفاتورة وتاريخ التفعيل لعرض تفاصيل الدورة تلقائيًا.
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <div className="flex items-center gap-2 text-sm">
+              <span>{L.viewLbl}:</span>
+              <select
+                value={view}
+                onChange={(e) => setView(e.target.value as FormatMode)}
+                className="rounded-full border px-3 py-1.5"
+              >
+                <option value="script">{L.mScript}</option>
+                <option value="totals">{L.mTotals}</option>
+                <option value="vat">{L.mVat}</option>
+              </select>
+            </div>
           </div>
-        </motion.div>
 
-        <Card className="order-1 border-white/70 bg-white/85 p-2 shadow-[0_34px_100px_-58px_rgba(255,120,50,0.78)] transition-shadow duration-300 hover:shadow-[0_40px_110px_-55px_rgba(255,120,60,0.88)] lg:order-2">
+          {/* Progress bar */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>{L.progress}</span>
+              <span>{percent}%</span>
+            </div>
+            <div className="relative h-3 w-full overflow-hidden rounded-full bg-[#FFEFE2]">
+              <motion.div
+                key={percent}
+                initial={{ width: 0 }}
+                animate={{ width: `${result ? result.ratio * 100 : 0}%` }}
+                transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+                className="absolute inset-y-0 right-0 rounded-full bg-gradient-to-l from-[#FF5E3D] via-[#FF7A3D] to-[#FFB36B] shadow-[0_16px_44px_-28px_rgba(255,120,60,0.9)]"
+              />
+            </div>
+          </div>
+
+          {/* Metrics grid */}
+          <AnimatePresence mode="wait">
+            {result && activation ? (
+              <motion.div
+                key="have"
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                className="grid gap-4 text-sm sm:grid-cols-2"
+              >
+                {/* Pro-rata period = Activation → first 15 */}
+                <Metric
+                  label={L.period}
+                  value={`${ymd(activation)} → ${ymd(result.end)}`}
+                />
+                <Metric
+                  label={L.counted}
+                  value={`${result.usedDays} / ${result.days}`}
+                />
+                <Metric
+                  label={L.proAmount}
+                  value={`JD ${result.value.toFixed(3)}`}
+                />
+                <Metric
+                  label={L.monthlyLbl}
+                  value={`JD ${monthly.toFixed(3)}`}
+                />
+                <Metric label={L.nextInv} value={ymd(result.end)} />
+                {coverageUntil && (
+                  <Metric label={L.coverage} value={ymd(coverageUntil)} />
+                )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                className="rounded-2xl bg-[#FFF6EF] p-6 text-sm text-muted-foreground shadow-inner"
+              >
+                {L.empty}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Inputs */}
+        <Card className="order-1 border-white/70 bg-white/85 p-2 shadow-[0_34px_100px_-58px_rgba(255,120,50,0.78)] lg:order-2">
           <CardHeader className="pb-2 text-right">
             <CardTitle className="text-lg font-semibold text-foreground">
-              بيانات الإدخال
+              {lang === "ar" ? "بيانات الإدخال" : "Inputs"}
             </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              يتم إصدار الفواتير دائمًا في يوم 15 من كل شهر.
-            </p>
+            <p className="text-sm text-muted-foreground">{L.tip}</p>
           </CardHeader>
           <CardContent className="space-y-6 pt-4 text-right">
+            {/* Monthly value */}
             <div className="space-y-2">
-              <Label htmlFor="invoice" className="flex items-center justify-end gap-2 text-sm font-semibold">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="cursor-help text-primary underline decoration-dotted underline-offset-4">
-                      قيمة الفاتورة الكاملة
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-right text-sm">
-                    أدخل قيمة الفاتورة التي تغطي دورة كاملة ليتم احتساب الجزء المستحق تلقائيًا.
-                  </TooltipContent>
-                </Tooltip>
-                <Coins className="h-4 w-4 text-primary" />
+              <Label htmlFor="monthly" className="text-sm font-semibold">
+                {L.monthly}
               </Label>
               <div className="relative">
                 <Input
-                  id="invoice"
+                  id="monthly"
                   inputMode="decimal"
                   placeholder="0.000"
-                  value={invoiceValue}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (/^\d*(?:[.,]\d{0,3})?$/.test(value)) {
-                      setInvoiceValue(value.replace(",", "."));
-                    }
+                  value={monthlyRaw}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(",", ".");
+                    if (/^\d*(?:\.\d{0,3})?$/.test(v)) setMonthlyRaw(v);
                   }}
-                  className="h-14 rounded-2xl border-white/70 bg-white/90 pr-12 text-base font-medium shadow-inner transition-shadow duration-300 focus-visible:ring-[#FF9A3D]/40 hover:shadow-[0_14px_36px_-28px_rgba(255,145,70,0.6)]"
+                  className="h-14 rounded-2xl border-white/70 bg-white/90 pr-12 text-base font-medium shadow-inner"
                 />
                 <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground">
-                  د.أ
+                  {lang === "ar" ? "د.أ" : "JD"}
                 </span>
               </div>
             </div>
 
+            {/* Activation date */}
             <div className="space-y-2">
-              <Label htmlFor="activation" className="flex items-center justify-end gap-2 text-sm font-semibold">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="cursor-help text-primary underline decoration-dotted underline-offset-4">
-                      تاريخ التفعيل
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-right text-sm">
-                    اليوم الذي بدأت فيه الخدمة فعليًا ليتم احتساب الفترة حتى أقرب يوم 15.
-                  </TooltipContent>
-                </Tooltip>
-                <CalendarDays className="h-4 w-4 text-primary" />
+              <Label htmlFor="activation" className="text-sm font-semibold">
+                {L.actDate}
               </Label>
               <Input
                 id="activation"
                 type="date"
-                value={activationDate}
-                onChange={(event) => setActivationDate(event.target.value)}
-                className="h-14 cursor-pointer rounded-2xl border-white/70 bg-white/90 pr-6 text-base font-medium shadow-inner transition-shadow duration-300 focus-visible:ring-[#FF9A3D]/40 hover:shadow-[0_14px_36px_-28px_rgba(255,145,70,0.6)]"
+                value={dateRaw}
+                onChange={(e) => setDateRaw(e.target.value)}
+                className="h-14 cursor-pointer rounded-2xl border-white/70 bg-white/90 pr-6 text-base font-medium shadow-inner"
               />
             </div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Script / Totals / VAT text block */}
       <AnimatePresence mode="wait">
         {result ? (
           <motion.div
-            key={result.explanation}
+            key="script"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -14 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="rounded-[2.5rem] border border-white/60 bg-white/80 p-8 text-right text-base leading-loose text-foreground shadow-[0_28px_90px_-56px_rgba(255,120,50,0.7)]"
           >
-            {result.explanation}
+            <pre
+              className="whitespace-pre-wrap"
+              dir={lang === "ar" ? "rtl" : "ltr"}
+            >
+              {script}
+            </pre>
           </motion.div>
         ) : (
           <motion.div
@@ -358,7 +314,7 @@ export function ProRataCalculator() {
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             className="rounded-[2.5rem] border border-dashed border-white/50 bg-white/50 p-8 text-right text-base text-muted-foreground"
           >
-            سيتم توليد شرح تفصيلي باللغة العربية يوضّح طريقة الاحتساب بمجرد إدخال البيانات.
+            {L.placeholder}
           </motion.div>
         )}
       </AnimatePresence>
