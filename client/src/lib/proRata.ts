@@ -134,37 +134,51 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
  * coverage until next 15, and full invoice if provided.
  */
 export function buildScript(o: ProrataOutput, locale: "ar" | "en") {
-  const start = ymd(o.cycleStartUTC);
-  const end = ymd(o.cycleEndUTC);
-  const next = ymd(o.nextCycleEndUTC);
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const activationUTC = new Date(o.cycleEndUTC.getTime() - o.proDays * DAY_MS);
+  const start = `${String(activationUTC.getUTCDate()).padStart(2, "0")}-${String(
+    activationUTC.getUTCMonth() + 1
+  ).padStart(2, "0")}-${activationUTC.getUTCFullYear()}`;
+  const end = `${String(o.cycleEndUTC.getUTCDate()).padStart(2, "0")}-${String(
+    o.cycleEndUTC.getUTCMonth() + 1
+  ).padStart(2, "0")}-${o.cycleEndUTC.getUTCFullYear()}`;
+  const next = `${String(o.nextCycleEndUTC.getUTCDate()).padStart(2, "0")}-${String(
+    o.nextCycleEndUTC.getUTCMonth() + 1
+  ).padStart(2, "0")}-${o.nextCycleEndUTC.getUTCFullYear()}`;
+
+  const monthly = `JD ${o.monthlyNet.toFixed(3)}`;
+  const prorata = `JD ${o.prorataNet.toFixed(3)}`;
+  const totalNet = `JD ${(o.monthlyNet + o.prorataNet).toFixed(3)}`;
+  const totalInvoice =
+    o.fullInvoiceGross != null
+      ? `JD ${Number(o.fullInvoiceGross).toFixed(3)}`
+      : totalNet;
 
   if (locale === "ar") {
+    const intro = `بحب أوضح لحضرتك أن الفاتورة صُدرت بنسبة وتناسب من تاريخ التفعيل ${start} حتى يوم ${end}.`;
+    const intro2 = `وفي نفس الفاتورة تم احتساب قيمة الاشتراك الشهري مقدّمًا من ${end} حتى ${next}.`;
     const lines = [
-      `${end} \u2192 ${start} : الفترة`,
-      `(${o.pctText}) ${o.proDaysText} : أيام البروراتا`,
-      `• قيمة البروراتا: ${o.prorataNetText}`,
-      `• قيمة الاشتراك الشهري: ${o.monthlyNetText}`,
-      `• تاريخ إصدار الفاتورة: ${end}، وتغطي الخدمة مقدّمًا حتى ${next}`,
+      intro,
+      intro2,
+      "",
+      `• قيمة الاشتراك الشهري: ${monthly}`,
+      `• قيمة النسبة والتناسب حتى يوم 15: ${prorata}`,
+      `• قيمة الفاتورة الكلية: ${totalInvoice}`,
+      `• تاريخ إصدار الفاتورة: ${end}، وتغطي الخدمة مقدّمًا حتى ${next}.`,
     ];
-    if (o.fullInvoiceGross != null) {
-      lines.push(
-        `• قيمة الفاتورة الكلّية: JD ${Number(o.fullInvoiceGross).toFixed(3)}`
-      );
-    }
-    return lines.join("\n");
-  } else {
-    const lines = [
-      `Period: ${start} → ${end}`,
-      `Pro-days: ${o.proDaysText} (${o.pctText})`,
-      `• Pro-rata value: ${o.prorataNetText}`,
-      `• Monthly (net): ${o.monthlyNetText}`,
-      `• Invoice issue date: ${end}, coverage in advance until ${next}`,
-    ];
-    if (o.fullInvoiceGross != null) {
-      lines.push(
-        `• Full invoice (gross): JD ${Number(o.fullInvoiceGross).toFixed(3)}`
-      );
-    }
     return lines.join("\n");
   }
+
+  const intro = `Just to clarify, the invoice prorates the service from ${start} through ${end}.`;
+  const intro2 = `The same invoice bills the monthly subscription in advance from ${end} until ${next}.`;
+  const lines = [
+    intro,
+    intro2,
+    "",
+    `• Monthly subscription value: ${monthly}`,
+    `• Pro-rata amount up to day 15: ${prorata}`,
+    `• Total invoice amount: ${totalInvoice}`,
+    `• Invoice issue date: ${end}, covering service in advance until ${next}.`,
+  ];
+  return lines.join("\n");
 }

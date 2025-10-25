@@ -101,6 +101,11 @@ interface ProrataIntent {
   monthlyNet?: number;
 }
 
+interface VatIntent {
+  amount: number;
+  quantity: number;
+}
+
 function parseProrataIntent(message: string): ProrataIntent | null {
   const normalized = normalizeDigits(message).replace(/[،,]/g, " ");
   const dateMatch = normalized.match(/(20\d{2}-\d{2}-\d{2})/);
@@ -119,14 +124,12 @@ function parseProrataIntent(message: string): ProrataIntent | null {
     if (!match) return undefined;
     const value = Number.parseFloat(match[2]);
     return Number.isFinite(value) ? value : undefined;
-  };
+    };
 
   const grossValue = parseAmount(grossMatch);
   const monthlyValue = parseAmount(monthlyMatch);
 
-  if (grossValue == null && monthlyValue == null) {
-    return null;
-  }
+  if (grossValue == null && monthlyValue == null) return null;
 
   if (grossValue != null && (monthlyValue == null || (grossMatch?.index ?? 0) >= (monthlyMatch?.index ?? 0))) {
     return { mode: "gross", activationDate, fullInvoiceGross: grossValue };
@@ -137,6 +140,32 @@ function parseProrataIntent(message: string): ProrataIntent | null {
   }
 
   return null;
+}
+
+const VAT_KEYWORDS = /(?:ضريبة|شامل|vat|ضريبه|tax|مع الضريبة|includes vat|include vat|with vat)/i;
+
+function parseVatIntent(message: string): VatIntent | null {
+  const normalized = normalizeDigits(message);
+  if (!VAT_KEYWORDS.test(normalized)) return null;
+
+  const numberMatches = Array.from(normalized.matchAll(/([0-9]+(?:\.[0-9]+)?)/g));
+  if (numberMatches.length === 0) return null;
+
+  const amount = Number.parseFloat(numberMatches[0][1]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  let quantity = 1;
+  const quantityPattern = normalized.match(
+    /(?:عدد|qty|quantity|pieces|بطاقات|كروت|شرائح|lines|x|×)\s*([0-9]+(?:\.[0-9]+)?)/i
+  );
+  if (quantityPattern) {
+    const parsedQty = Number.parseFloat(quantityPattern[1]);
+    if (Number.isFinite(parsedQty) && parsedQty > 0) {
+      quantity = parsedQty;
+    }
+  }
+
+  return { amount, quantity };
 }
 
 function detectDocNavigation(
@@ -259,6 +288,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const docUpdateNote = buildDocsUpdateNote(docUpdate, detectedLocale);
 
+      // --- Pro-rata intent ---
       const prorataIntent = latestUserMessage
         ? parseProrataIntent(latestUserMessage.content)
         : null;
@@ -277,6 +307,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const period = `${ymd(result.cycleStartUTC)} → ${ymd(result.cycleEndUTC)}`;
         const coverageUntil = ymd(result.nextCycleEndUTC);
+
         const message = buildAssistantMessage({
           locale: detectedLocale,
           content: combineText(detectedLocale, docUpdateNote, {
@@ -303,6 +334,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ message });
       }
 
+      // --- VAT intent ---
+      const vatIntent = latestUserMessage
+        ? parseVatIntent(latestUserMessage.content)
+        : null;
+
+      if (vatIntent) {
+        const unitVat = vatIntent.amount * 0.16;
+        const unitTotal = vatIntent.amount + unitVat;
+        const subtotal = vatIntent.amount * vatIntent.quantity;
+        const totalVat = unitVat * vatIntent.quantity;
+        const totalDue = unitTotal * vatIntent.quantity;
+
+        const ar = `القيمة مع ضريبة %16 هي JD ${unitTotal.toFixed(
+          3
+        )} لكل وحدة (الضريبة: JD ${unitVat.toFixed(3)}).\nالإجمالي لعدد ${
+          vatIntent.quantity
+        }: صافي JD ${subtotal.toFixed(3)} + ضريبة JD ${totalVat.toFixed(
+          3
+        )} = JD ${totalDue.toFixed(3)}.`;
+        const en = `With 16% VAT, each unit is JD ${unitTotal.toFixed(
+          3
+        )} (VAT: JD ${unitVat.toFixed(3)}).\nTotal for ${vatIntent.quantity}: net JD ${subtotal.toFixed(
+          3
+        )} + VAT JD ${totalVat.toFixed(3)} = JD ${totalDue.toFixed(3)}.`;
+
+        const message = buildAssistantMessage({
+          locale: detectedLocale,
+          content: combineText(detectedLocale, docUpdateNote, { ar, en }),
+        });
+
+        return res.json({ message });
+      }
+
+      // --- Doc navigation intent ---
       const docIntent = latestUserMessage
         ? detectDocNavigation(latestUserMessage.content, docs)
         : null;
@@ -329,6 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ message });
       }
 
+      // If only docs were updated and the user sent a long, non-question message, surface the update note
       if (
         docUpdateNote &&
         latestUserMessage &&

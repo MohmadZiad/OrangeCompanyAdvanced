@@ -44,7 +44,7 @@ export function DocsNavigator({ docs, locale, onSelect }: DocsNavigatorProps) {
         <Button
           variant="outline"
           size="sm"
-          className="min-w-[150px] justify-between rounded-full border-white/60 bg-white/80 text-foreground hover:bg-white dark:border-white/10 dark:bg-white/10"
+          className="min-w-[170px] justify-between rounded-full border-white/60 bg-white/80 px-5 text-sm font-medium text-foreground shadow-sm hover:bg-white dark:border-white/10 dark:bg-white/10"
         >
           <span className="truncate">{label}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 opacity-60" />
@@ -52,9 +52,9 @@ export function DocsNavigator({ docs, locale, onSelect }: DocsNavigatorProps) {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-72 p-0"
         sideOffset={8}
         dir={locale === "ar" ? "rtl" : "ltr"}
+        className="w-72 rounded-3xl border bg-popover p-0 text-popover-foreground shadow-lg"
       >
         <Command>
           <CommandInput
@@ -67,8 +67,8 @@ export function DocsNavigator({ docs, locale, onSelect }: DocsNavigatorProps) {
             <CommandGroup>
               {items.map((doc) => (
                 <CommandItem
-                  key={doc.id}
-                  value={doc.id}
+                  key={String(doc.id)}
+                  value={normalize(doc.title)}
                   onSelect={() => {
                     setOpen(false);
                     onSelect(doc);
@@ -84,7 +84,10 @@ export function DocsNavigator({ docs, locale, onSelect }: DocsNavigatorProps) {
                     </span>
                   </div>
                   {doc.url ? (
-                    <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    <ExternalLink
+                      className="h-3.5 w-3.5 shrink-0 opacity-60"
+                      aria-hidden="true"
+                    />
                   ) : null}
                 </CommandItem>
               ))}

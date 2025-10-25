@@ -44,7 +44,7 @@ export const SMART_LINKS: Record<SmartLinkId, SmartLink> = {
       en: "Find recharge channels, e-vouchers, and payment partners.",
       ar: "تعرف على طرق الشحن، القسائم الإلكترونية، وشركاء الدفع.",
     },
-    href: "https://www.orange.jo/__REPLACE_RECHARGE__",
+    href: "https://orange.jo/en/offers/quick-pay",
     keywords: ["recharge", "top up", "payment", "pay", "voucher", "top-up"],
     category: "billing",
   },
