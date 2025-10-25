@@ -1,5 +1,5 @@
 // client/src/components/Chatbot.tsx
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -15,9 +15,12 @@ import { t, quickReplies } from "@/lib/i18n";
 import { MessageSquare, Send, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@shared/schema";
+import type { ChatMessage, DocEntry } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { SmartLinkPill } from "@/components/SmartLinkPill";
+import { CopyButton } from "@/components/CopyButton";
+import { useToast } from "@/hooks/use-toast";
+import { DocsNavigator } from "@/components/DocsNavigator";
 import {
   getSmartLinkCandidates,
   listSmartLinks,
@@ -32,6 +35,12 @@ export function Chatbot() {
 
   const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
     useAppStore();
+
+  const { toast } = useToast();
+  const [docs, setDocs] = useState<DocEntry[]>([]);
+  const handledNavigatePayloads = useRef<Set<string>>(new Set());
+  const hasSeededNavigate = useRef(false);
+  const handledDocsUpdates = useRef<Set<string>>(new Set());
 
   const recommendedSmartLinks = useMemo(() => {
     const latestInput = message.trim()
@@ -67,6 +76,78 @@ export function Chatbot() {
       abortRef.current?.abort();
     };
   }, []);
+
+  const fetchDocs = useCallback(async () => {
+    try {
+      const response = await fetch("/api/docs");
+      if (!response.ok) throw new Error("Failed to load docs");
+      const data: { docs?: DocEntry[] } = await response.json();
+      if (Array.isArray(data.docs)) {
+        setDocs(data.docs);
+      }
+    } catch (error) {
+      toast({
+        title: locale === "ar" ? "تعذر تحميل المستندات" : "Docs unavailable",
+        description:
+          locale === "ar"
+            ? "حدث خطأ أثناء تحميل قائمة المستندات."
+            : "We couldn't load the docs list just now.",
+      });
+    }
+  }, [toast, locale]);
+
+  const handleDocSelect = useCallback(
+    (doc: DocEntry) => {
+      if (doc.url) {
+        window.open(doc.url, "_blank", "noopener,noreferrer");
+      } else {
+        toast({
+          title:
+            locale === "ar" ? "أضف رابطًا للمستند" : "Add a link to this doc",
+          description:
+            locale === "ar"
+              ? `أضف الرابط في docs.json: ${doc.title}`
+              : `Fill the URL inside docs.json for: ${doc.title}`,
+        });
+      }
+    },
+    [toast, locale]
+  );
+
+  useEffect(() => {
+    if (isChatOpen) {
+      fetchDocs();
+    }
+  }, [isChatOpen, fetchDocs]);
+
+  useEffect(() => {
+    const latestUpdate = [...chatMessages]
+      .reverse()
+      .find((msg) => msg.payload?.kind === "docs-update");
+    if (latestUpdate && !handledDocsUpdates.current.has(latestUpdate.id)) {
+      handledDocsUpdates.current.add(latestUpdate.id);
+      fetchDocs();
+    }
+  }, [chatMessages, fetchDocs]);
+
+  useEffect(() => {
+    if (!hasSeededNavigate.current) {
+      chatMessages.forEach((msg) => {
+        if (msg.payload?.kind === "navigate-doc") {
+          handledNavigatePayloads.current.add(msg.id);
+        }
+      });
+      hasSeededNavigate.current = true;
+      return;
+    }
+
+    chatMessages.forEach((msg) => {
+      if (msg.payload?.kind !== "navigate-doc") return;
+      if (handledNavigatePayloads.current.has(msg.id)) return;
+      handledNavigatePayloads.current.add(msg.id);
+      handleDocSelect(msg.payload.doc);
+    });
+  }, [chatMessages, handleDocSelect]);
 
   const handleSend = async (text?: string) => {
     const messageText = text ?? message;
@@ -104,14 +185,38 @@ export function Chatbot() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [...chatMessages, userMessage].map((m) => ({
+            id: m.id,
             role: m.role,
             content: m.content,
+            timestamp: m.timestamp,
           })),
+          locale,
         }),
         signal: ac.signal,
       });
 
       if (!response.ok) throw new Error("Failed to get response");
+
+      const contentType = response.headers.get("content-type") ?? "";
+
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data?.message) {
+          const assistantMessage = data.message as ChatMessage;
+          useAppStore.setState((state) => ({
+            chatMessages: state.chatMessages.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...assistantMessage,
+                    id: assistantMessageId,
+                  }
+                : msg
+            ),
+          }));
+        }
+        return;
+      }
+
       if (!response.body) throw new Error("No response body");
 
       const reader = response.body.getReader();
@@ -242,15 +347,22 @@ export function Chatbot() {
                   </span>
                   {t("chatTitle", locale)}
                 </CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setChatOpen(false)}
-                  className="hover-elevate active-elevate-2"
-                  data-testid="button-close-chat"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <DocsNavigator
+                    docs={docs}
+                    locale={locale}
+                    onSelect={handleDocSelect}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setChatOpen(false)}
+                    className="hover-elevate active-elevate-2"
+                    data-testid="button-close-chat"
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
               </CardHeader>
 
               <CardContent className="flex-1 overflow-hidden p-0">
@@ -316,6 +428,13 @@ export function Chatbot() {
                                   )
                               )}
                             </div>
+
+                            {msg.payload?.kind === "prorata" && (
+                              <ProrataSummaryCard
+                                data={msg.payload.data}
+                                locale={msg.payload.locale}
+                              />
+                            )}
 
                             <span className="mt-2 block text-xs opacity-70">
                               {new Date(msg.timestamp).toLocaleTimeString(
@@ -449,4 +568,80 @@ function parseMessageSegments(content: string): MessageSegment[] {
   }
 
   return segments;
+}
+
+type ProrataPayload = Extract<
+  NonNullable<ChatMessage["payload"]>,
+  { kind: "prorata" }
+>;
+
+function ProrataSummaryCard({
+  data,
+  locale,
+}: {
+  data: ProrataPayload["data"];
+  locale: "en" | "ar";
+}) {
+  const rows: { key: string; label: { ar: string; en: string }; value: string }[] = [
+    { key: "period", label: { ar: "الفترة", en: "Period" }, value: data.period },
+    {
+      key: "proDays",
+      label: { ar: "أيام البروراتا", en: "Pro-days" },
+      value: `${data.proDays} • ${data.percent}`,
+    },
+    {
+      key: "monthlyNet",
+      label: { ar: "الاشتراك الصافي", en: "Monthly net" },
+      value: data.monthlyNet,
+    },
+    {
+      key: "prorataNet",
+      label: { ar: "قيمة البروراتا", en: "Pro-rata net" },
+      value: data.prorataNet,
+    },
+    {
+      key: "invoiceDate",
+      label: { ar: "تاريخ الفاتورة", en: "Invoice date" },
+      value: data.invoiceDate,
+    },
+    {
+      key: "coverage",
+      label: { ar: "تغطية حتى", en: "Coverage until" },
+      value: data.coverageUntil,
+    },
+  ];
+
+  if (typeof data.fullInvoiceGross === "number") {
+    rows.push({
+      key: "full",
+      label: { ar: "الفاتورة الإجمالية", en: "Full invoice (gross)" },
+      value: `JD ${data.fullInvoiceGross.toFixed(3)}`,
+    });
+  }
+
+  const bilingualLabel = (label: { ar: string; en: string }) =>
+    locale === "ar"
+      ? `${label.ar} • ${label.en}`
+      : `${label.en} • ${label.ar}`;
+
+  return (
+    <div className="mt-3 space-y-4 rounded-2xl border border-white/60 bg-white/90 p-4 text-sm text-foreground shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/10">
+      <div className="grid gap-3">
+        {rows.map((row) => (
+          <div key={row.key} className="flex flex-col">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {bilingualLabel(row.label)}
+            </span>
+            <span className="font-semibold text-foreground">{row.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+        {locale === "ar"
+          ? "انسخ النص / Copy script"
+          : "Copy script / انسخ النص"}
+        <CopyButton text={data.script} size="icon" />
+      </div>
+    </div>
+  );
 }
