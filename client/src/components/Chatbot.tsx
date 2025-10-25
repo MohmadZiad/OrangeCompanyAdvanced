@@ -1,5 +1,5 @@
 // client/src/components/Chatbot.tsx
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -13,11 +13,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppStore } from "@/lib/store";
 import { t, quickReplies } from "@/lib/i18n";
 import { MessageSquare, Send, X } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@shared/schema";
+import type { ChatMessage, DocEntry } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { SmartLinkPill } from "@/components/SmartLinkPill";
+import { CopyButton } from "@/components/CopyButton";
+import { useToast } from "@/hooks/use-toast";
+import { DocsNavigator } from "@/components/DocsNavigator";
 import {
   getSmartLinkCandidates,
   listSmartLinks,
@@ -32,6 +35,12 @@ export function Chatbot() {
 
   const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
     useAppStore();
+
+  const { toast } = useToast();
+  const [docs, setDocs] = useState<DocEntry[]>([]);
+  const handledNavigatePayloads = useRef<Set<string>>(new Set());
+  const hasSeededNavigate = useRef(false);
+  const handledDocsUpdates = useRef<Set<string>>(new Set());
 
   const recommendedSmartLinks = useMemo(() => {
     const latestInput = message.trim()
@@ -54,19 +63,85 @@ export function Chatbot() {
       .slice(0, 3);
   }, [chatMessages, message]);
 
-  // autoscroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatMessages]);
 
-  // cleanup على الإزالة
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const fetchDocs = useCallback(async () => {
+    try {
+      const response = await fetch("/api/docs");
+      if (!response.ok) throw new Error("Failed to load docs");
+      const data: { docs?: DocEntry[] } = await response.json();
+      if (Array.isArray(data.docs)) {
+        setDocs(data.docs);
+      }
+    } catch (error) {
+      toast({
+        title: locale === "ar" ? "تعذر تحميل المستندات" : "Docs unavailable",
+        description:
+          locale === "ar"
+            ? "حدث خطأ أثناء تحميل قائمة المستندات."
+            : "We couldn't load the docs list just now.",
+      });
+    }
+  }, [toast, locale]);
+
+  const handleDocSelect = useCallback(
+    (doc: DocEntry) => {
+      if (doc.url) {
+        window.open(doc.url, "_blank", "noopener,noreferrer");
+      } else {
+        toast({
+          title:
+            locale === "ar" ? "أضف رابطًا للمستند" : "Add a link to this doc",
+          description:
+            locale === "ar"
+              ? `أضف الرابط في docs.json: ${doc.title}`
+              : `Fill the URL inside docs.json for: ${doc.title}`,
+        });
+      }
+    },
+    [toast, locale]
+  );
+
   useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
+    if (isChatOpen) {
+      fetchDocs();
+    }
+  }, [isChatOpen, fetchDocs]);
+
+  useEffect(() => {
+    const latestUpdate = [...chatMessages]
+      .reverse()
+      .find((msg) => msg.payload?.kind === "docs-update");
+    if (latestUpdate && !handledDocsUpdates.current.has(latestUpdate.id)) {
+      handledDocsUpdates.current.add(latestUpdate.id);
+      fetchDocs();
+    }
+  }, [chatMessages, fetchDocs]);
+
+  useEffect(() => {
+    if (!hasSeededNavigate.current) {
+      chatMessages.forEach((msg) => {
+        if (msg.payload?.kind === "navigate-doc") {
+          handledNavigatePayloads.current.add(msg.id);
+        }
+      });
+      hasSeededNavigate.current = true;
+      return;
+    }
+
+    chatMessages.forEach((msg) => {
+      if (msg.payload?.kind !== "navigate-doc") return;
+      if (handledNavigatePayloads.current.has(msg.id)) return;
+      handledNavigatePayloads.current.add(msg.id);
+      handleDocSelect(msg.payload.doc);
+    });
+  }, [chatMessages, handleDocSelect]);
 
   const handleSend = async (text?: string) => {
     const messageText = text ?? message;
@@ -83,7 +158,6 @@ export function Chatbot() {
     setMessage("");
     setIsLoading(true);
 
-    // رسالة مؤقتة للمساعد (البث)
     const assistantMessageId = (Date.now() + 1).toString();
     const tempAssistantMessage: ChatMessage = {
       id: assistantMessageId,
@@ -93,7 +167,6 @@ export function Chatbot() {
     };
     addChatMessage(tempAssistantMessage);
 
-    // إلغاء أي طلب سابق
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -104,14 +177,38 @@ export function Chatbot() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [...chatMessages, userMessage].map((m) => ({
+            id: m.id,
             role: m.role,
             content: m.content,
+            timestamp: m.timestamp,
           })),
+          locale,
         }),
         signal: ac.signal,
       });
 
       if (!response.ok) throw new Error("Failed to get response");
+
+      const contentType = response.headers.get("content-type") ?? "";
+
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data?.message) {
+          const assistantMessage = data.message as ChatMessage;
+          useAppStore.setState((state) => ({
+            chatMessages: state.chatMessages.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...assistantMessage,
+                    id: assistantMessageId,
+                  }
+                : msg
+            ),
+          }));
+        }
+        return;
+      }
+
       if (!response.body) throw new Error("No response body");
 
       const reader = response.body.getReader();
@@ -124,7 +221,6 @@ export function Chatbot() {
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        // SSE lines
         const lines = chunk.split("\n");
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
@@ -150,12 +246,11 @@ export function Chatbot() {
               throw new Error(parsed.error);
             }
           } catch {
-            // تجاهل الأسطر غير المكتملة
+            /* ignore partial lines */
           }
         }
       }
 
-      // تأكيد الحفظ النهائي
       if (accumulated) {
         useAppStore.setState((state) => ({
           chatMessages: state.chatMessages.map((msg) =>
@@ -166,7 +261,6 @@ export function Chatbot() {
         }));
       }
     } catch (err) {
-      // خطأ: استبدل الرسالة المؤقتة برسالة خطأ ودية
       useAppStore.setState((state) => ({
         chatMessages: state.chatMessages.map((msg) =>
           msg.id === assistantMessageId
@@ -189,16 +283,22 @@ export function Chatbot() {
     handleSend(replyText);
   };
 
+  const closeChat = () => {
+    setChatOpen(false);
+    abortRef.current?.abort();
+  };
+
+  const isArabic = locale === "ar";
+
   return (
     <>
-      {/* زر عائم لفتح الشات */}
       <AnimatePresence>
         {!isChatOpen && (
           <motion.div
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
-            className="fixed bottom-6 right-6 z-50"
+            className="fixed bottom-6 right-6 z-40"
             style={{ direction: "ltr" }}
           >
             <Button
@@ -210,7 +310,7 @@ export function Chatbot() {
             >
               <MessageSquare className="h-6 w-6" />
               {chatMessages.length > 0 && (
-                <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs">
                   {chatMessages.filter((m) => m.role === "assistant").length}
                 </span>
               )}
@@ -219,91 +319,108 @@ export function Chatbot() {
         )}
       </AnimatePresence>
 
-      {/* لوحة الشات */}
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
-            initial={{ x: locale === "ar" ? -400 : 400, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: locale === "ar" ? -400 : 400, opacity: 0 }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className={cn(
-              "fixed top-0 bottom-0 z-50 w-full sm:w-[420px] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
-              locale === "ar" ? "left-0" : "right-0"
-            )}
-            style={{ direction: locale === "ar" ? "rtl" : "ltr" }}
-            data-testid="chat-panel"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
           >
-            <Card className="flex h-full flex-col rounded-none border-0 bg-white/75 backdrop-blur-2xl sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-white/50 pb-4 dark:border-white/10">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white">
-                    <MessageSquare className="h-5 w-5" />
-                  </span>
-                  {t("chatTitle", locale)}
-                </CardTitle>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setChatOpen(false)}
-                  className="hover-elevate active-elevate-2"
-                  data-testid="button-close-chat"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
-              </CardHeader>
+            <div
+              className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+              onClick={closeChat}
+            />
+            <motion.div
+              initial={{ y: isArabic ? -40 : 40, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: isArabic ? -40 : 40, opacity: 0 }}
+              transition={{ type: "spring", damping: 24, stiffness: 220 }}
+              className="relative z-10 w-full max-w-4xl"
+            >
+              <Card
+                dir={isArabic ? "rtl" : "ltr"}
+                className="flex max-h-[80vh] flex-col overflow-hidden rounded-[2.5rem] border-white/60 bg-white/85 shadow-[0_42px_120px_-48px_rgba(255,90,0,0.6)] backdrop-blur-xl dark:bg-white/10"
+                data-testid="chat-panel"
+              >
+                <CardHeader className="space-y-4 bg-gradient-to-br from-[#FFE7D6] via-[#FFE0CC] to-[#FFD5BA] px-8 py-6">
+                  <div className="flex items-center justify-between gap-4">
+                    <CardTitle className="flex items-center gap-3 text-xl">
+                      <span className="flex h-12 w-12 items-center justify-center rounded-[1.5rem] bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_24px_60px_-30px_rgba(255,90,0,0.75)]">
+                        <MessageSquare className="h-5 w-5" />
+                      </span>
+                      <span>{t("chatTitle", locale)}</span>
+                    </CardTitle>
+                    <div className="flex items-center gap-3">
+                      <DocsNavigator
+                        docs={docs}
+                        locale={locale}
+                        onSelect={handleDocSelect}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={closeChat}
+                        className="rounded-full hover:bg-white/60"
+                        data-testid="button-close-chat"
+                      >
+                        <X className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {isArabic
+                      ? "تحدث مباشرة مع المساعد ثنائي اللغة، أو اختر مستندًا لفتحه في تبويب جديد."
+                      : "Chat with the bilingual assistant or open a doc instantly in a new tab."}
+                  </p>
+                </CardHeader>
 
-              <CardContent className="flex-1 overflow-hidden p-0">
-                <ScrollArea className="h-full p-5" ref={scrollRef}>
-                  <div className="space-y-4">
-                    {chatMessages.length === 0 && (
-                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg白/5 dark:bg-white/5">
-                        <MessageSquare className="mx-auto mb-4 h-12 w-12 opacity-70" />
-                        <p className="text-sm">
-                          {t("chatPlaceholder", locale)}
-                        </p>
-                      </div>
-                    )}
-
-                    {chatMessages.map((msg) => {
-                      const isErrorMessage =
-                        msg.role === "assistant" &&
-                        /عذرًا|sorry/i.test(msg.content);
-                      const isSuccessMessage =
-                        msg.role === "assistant" && !isErrorMessage;
-
-                      return (
+                <CardContent className="flex-1 overflow-hidden px-0">
+                  <ScrollArea className="h-full px-8" ref={scrollRef}>
+                    <div className="space-y-5 py-6">
+                      {chatMessages.length === 0 && (
                         <motion.div
-                          key={msg.id}
-                          initial={{ opacity: 0, y: 10 }}
+                          initial={{ opacity: 0, y: 12 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className={cn(
-                            "flex",
-                            msg.role === "user" ? "justify-end" : "justify-start"
-                          )}
+                          className="rounded-[2rem] border border-dashed border-white/60 bg-white/75 px-8 py-12 text-center text-muted-foreground shadow-inner backdrop-blur"
                         >
-                          <div
-                            className={cn(
-                              "max-w-[85%] rounded-3xl px-4 py-3 shadow-sm backdrop-blur",
-                              msg.role === "user"
-                                ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
-                                : "bg-white/80 text-foreground dark:bg-white/10",
-                              isErrorMessage && "animate-[wiggle_0.45s]",
-                              isSuccessMessage && "animate-[successPulse_0.9s]"
-                            )}
-                            data-testid={`chat-message-${msg.role}`}
+                          <MessageSquare className="mx-auto mb-4 h-12 w-12 text-primary/60" />
+                          <p className="text-sm">{t("chatPlaceholder", locale)}</p>
+                        </motion.div>
+                      )}
+
+                      {chatMessages.map((msg) => {
+                        const isUser = msg.role === "user";
+                        const isErrorMessage =
+                          msg.role === "assistant" && /عذرًا|sorry/i.test(msg.content);
+
+                        return (
+                          <motion.div
+                            key={msg.id}
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2, ease: "easeOut" }}
+                            className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
                           >
-                            <div className="space-y-2 text-sm leading-6">
-                              {parseMessageSegments(msg.content).map(
-                                (segment, index) =>
+                            <div
+                              className={cn(
+                                "max-w-[80%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
+                                isUser
+                                  ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
+                                  : "bg-white/90 text-foreground backdrop-blur",
+                                isErrorMessage && "ring-2 ring-destructive/60"
+                              )}
+                              data-testid={`chat-message-${msg.role}`}
+                            >
+                              <div className="space-y-2 text-sm leading-7">
+                                {parseMessageSegments(msg.content).map((segment, index) =>
                                   segment.type === "link" ? (
                                     <SmartLinkPill
                                       key={`${msg.id}-link-${index}`}
                                       linkId={segment.linkId}
                                       className={cn(
                                         "inline-flex",
-                                        msg.role === "user" &&
-                                          "bg-white/90 text-foreground"
+                                        isUser && "bg-white/90 text-foreground"
                                       )}
                                     />
                                   ) : (
@@ -314,51 +431,33 @@ export function Chatbot() {
                                       {segment.content}
                                     </span>
                                   )
+                                )}
+                              </div>
+
+                              {msg.payload?.kind === "prorata" && (
+                                <ProrataSummaryCard
+                                  data={msg.payload.data}
+                                  locale={msg.payload.locale}
+                                />
                               )}
                             </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
 
-                            <span className="mt-2 block text-xs opacity-70">
-                              {new Date(msg.timestamp).toLocaleTimeString(
-                                locale === "ar" ? "ar-JO" : "en-US",
-                                { hour: "2-digit", minute: "2-digit" }
-                              )}
-                            </span>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-
-                    {isLoading && (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="flex justify-start"
-                      >
-                        <div className="flex items-center gap-3 rounded-3xl bg-white/80 px-4 py-3 text-foreground backdrop-blur dark:bg-white/10">
-                          <span className="loading-ring" />
-                          <span className="text-sm">
-                            {t("thinking", locale)}
-                          </span>
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-
-              <CardFooter className="flex-col gap-4 border-t border-white/40 p-5 dark:border-white/10">
-                {/* Quick Replies */}
-                {chatMessages.length === 0 && (
-                  <div className="w-full">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      {t("quickReplies", locale)}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
+                <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/80 px-8 py-6 backdrop-blur">
+                  {quickReplies.length > 0 && (
+                    <div className="flex w-full flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-muted-foreground">
+                        {t("quickReplies", locale)}
+                      </span>
                       {quickReplies.map((reply) => (
                         <Badge
                           key={reply.id}
-                          variant="secondary"
-                          className="cursor-pointer rounded-full bg-white/80 px-3 py-2 text-xs font-medium text-foreground shadow-sm backdrop-blur transition hover:-translate-y-1 dark:bg-white/10"
+                          className="cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:-translate-y-1"
                           onClick={() => handleQuickReply(reply.text[locale])}
                           data-testid={`quick-reply-${reply.id}`}
                         >
@@ -366,51 +465,49 @@ export function Chatbot() {
                         </Badge>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {recommendedSmartLinks.length > 0 && (
-                  <div className="w-full">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      {locale === "ar"
-                        ? "روابط أورنج الرسمية"
-                        : "Official Orange links"}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {recommendedSmartLinks.map((linkId) => (
-                        <SmartLinkPill key={linkId} linkId={linkId} />
-                      ))}
+                  {recommendedSmartLinks.length > 0 && (
+                    <div className="w-full">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+                        {locale === "ar" ? "روابط أورنج" : "Official Orange links"}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {recommendedSmartLinks.map((linkId) => (
+                          <SmartLinkPill key={linkId} linkId={linkId} />
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Input */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleSend();
-                  }}
-                  className="flex w-full gap-3"
-                >
-                  <Input
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    placeholder={t("chatPlaceholder", locale)}
-                    disabled={isLoading}
-                    className="flex-1"
-                    data-testid="input-chat-message"
-                  />
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={!message.trim() || isLoading}
-                    data-testid="button-send-message"
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSend();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-full border border-white/70 bg-white px-4 py-2 shadow-[0_18px_40px_-30px_rgba(255,90,0,0.35)]"
                   >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </form>
-              </CardFooter>
-            </Card>
+                    <Input
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      placeholder={t("chatPlaceholder", locale)}
+                      disabled={isLoading}
+                      className="h-12 flex-1 border-0 bg-transparent px-1 text-sm focus-visible:ring-0"
+                      data-testid="input-chat-message"
+                    />
+                    <Button
+                      type="submit"
+                      size="icon"
+                      disabled={!message.trim() || isLoading}
+                      className="h-11 w-11 rounded-full bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_20px_50px_-30px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
+                      data-testid="button-send-message"
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </form>
+                </CardFooter>
+              </Card>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -449,4 +546,91 @@ function parseMessageSegments(content: string): MessageSegment[] {
   }
 
   return segments;
+}
+
+type ProrataPayload = Extract<
+  NonNullable<ChatMessage["payload"]>,
+  { kind: "prorata" }
+>;
+
+function ProrataSummaryCard({
+  data,
+  locale,
+}: {
+  data: ProrataPayload["data"];
+  locale: "en" | "ar";
+}) {
+  const isArabic = locale === "ar";
+  const label = (en: string, ar: string) => (isArabic ? ar : en);
+
+  return (
+    <div className="space-y-4 rounded-[1.8rem] border border-white/70 bg-gradient-to-br from-[#FFECD9]/80 via-[#FFE6CE]/85 to-[#FFD9B7]/85 p-5 text-sm text-foreground shadow-inner backdrop-blur">
+      <div className="grid gap-3 md:grid-cols-2">
+        <ProrataMetric
+          label={label("Period", "الفترة")}
+          value={data.period}
+        />
+        <ProrataMetric
+          label={label("Pro-days", "أيام البروراتا")}
+          value={`${data.proDays} · ${data.percent}`}
+        />
+        <ProrataMetric
+          label={label("Monthly (net)", "الاشتراك الشهري")}
+          value={data.monthlyNet}
+        />
+        <ProrataMetric
+          label={label("Pro-rata (net)", "قيمة البروراتا")}
+          value={data.prorataNet}
+        />
+        <ProrataMetric
+          label={label("Invoice date", "تاريخ الفاتورة")}
+          value={data.invoiceDate}
+        />
+        <ProrataMetric
+          label={label("Coverage until", "تغطية حتى")}
+          value={data.coverageUntil}
+        />
+      </div>
+      {typeof data.fullInvoiceGross === "number" && (
+        <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-xs font-medium">
+          {label("Full invoice (gross)", "الفاتورة الإجمالية")}: JD
+          {" "}
+          {data.fullInvoiceGross.toFixed(3)}
+        </div>
+      )}
+      <div className="space-y-3 rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 text-sm shadow-inner">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+          {label("Copy-ready script", "النص الجاهز للنسخ")}
+        </p>
+        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-6 text-foreground">
+          {data.script}
+        </pre>
+        <div className="flex justify-end">
+          <CopyButton
+            text={data.script}
+            label={label("Copy", "نسخ")}
+            variant="secondary"
+            className="rounded-full bg-gradient-to-r from-[#FF7A00] via-[#FF5400] to-[#FF3C00] px-4 py-2 text-white shadow-[0_18px_42px_-28px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProrataMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 shadow-[0_16px_36px_-28px_rgba(0,0,0,0.18)]">
+      <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 font-semibold text-foreground">{value}</p>
+    </div>
+  );
 }

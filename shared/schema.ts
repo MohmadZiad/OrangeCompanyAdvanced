@@ -49,20 +49,63 @@ export interface ProRataResults {
 }
 
 // ============================================================================
-// Chat Message Schemas
+// Docs & Chat Schemas
 // ============================================================================
+
+export const docEntrySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  url: z.string(),
+  tags: z.array(z.string()).optional(),
+});
+
+export type DocEntry = z.infer<typeof docEntrySchema>;
+
+export const chatPayloadSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("prorata"),
+    locale: z.enum(["en", "ar"]),
+    data: z.object({
+      period: z.string(),
+      proDays: z.string(),
+      percent: z.string(),
+      monthlyNet: z.string(),
+      prorataNet: z.string(),
+      invoiceDate: z.string(),
+      coverageUntil: z.string(),
+      script: z.string(),
+      fullInvoiceGross: z.number().optional(),
+    }),
+  }),
+  z.object({
+    kind: z.literal("navigate-doc"),
+    locale: z.enum(["en", "ar"]),
+    doc: docEntrySchema,
+    note: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("docs-update"),
+    locale: z.enum(["en", "ar"]),
+    added: z.array(docEntrySchema).default([]),
+    updated: z.array(docEntrySchema).default([]),
+  }),
+]);
+
+export type ChatPayload = z.infer<typeof chatPayloadSchema>;
 
 export const chatMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["user", "assistant", "system"]),
   content: z.string(),
   timestamp: z.number(),
+  payload: chatPayloadSchema.optional(),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 export const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema),
+  locale: z.enum(["en", "ar"]).optional(),
 });
 
 export type ChatRequest = z.infer<typeof chatRequestSchema>;

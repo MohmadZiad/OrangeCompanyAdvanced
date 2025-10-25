@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NumericKeypad } from "./NumericKeypad";
 import { ResultCard } from "./ResultCard";
-import { calculateOrangePricing, CALCULATOR_FORMULAS } from "@/lib/calc";
+import { calculateOrangePricing } from "@/lib/calc";
 import { useAppStore } from "@/lib/store";
 import { t } from "@/lib/i18n";
 import { Calculator } from "lucide-react";
@@ -138,13 +138,6 @@ export function OrangeCalculator() {
               </Button>
             </div>
 
-            {/* Textual formulae for transparency/help */}
-            <div className="neumorph-soft rounded-3xl border border-white/60 p-4 text-xs font-mono text-muted-foreground backdrop-blur dark:bg-white/5">
-              <p className="font-semibold">{t("formula", locale)}:</p>
-              <p>Nos_b_Nos: {CALCULATOR_FORMULAS.nosB_Nos}</p>
-              <p>Voice Calls: {CALCULATOR_FORMULAS.voiceCallsOnly}</p>
-              <p>Data Only: {CALCULATOR_FORMULAS.dataOnly}</p>
-            </div>
           </CardContent>
         </Card>
 
@@ -155,25 +148,21 @@ export function OrangeCalculator() {
               <ResultCard
                 title={t("basePriceLabel", locale)}
                 value={results.base}
-                formula={CALCULATOR_FORMULAS.base}
                 index={0}
               />
               <ResultCard
                 title={t("nosB_NosLabel", locale)}
                 value={results.nosB_Nos}
-                formula={CALCULATOR_FORMULAS.nosB_Nos}
                 index={1}
               />
               <ResultCard
                 title={t("voiceCallsOnlyLabel", locale)}
                 value={results.voiceCallsOnly}
-                formula={CALCULATOR_FORMULAS.voiceCallsOnly}
                 index={2}
               />
               <ResultCard
                 title={t("dataOnlyLabel", locale)}
                 value={results.dataOnly}
-                formula={CALCULATOR_FORMULAS.dataOnly}
                 index={3}
               />
             </>
