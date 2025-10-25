@@ -1,4 +1,3 @@
-// client/src/components/Chatbot.tsx
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   Card,
@@ -13,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppStore } from "@/lib/store";
 import { t, quickReplies } from "@/lib/i18n";
 import { MessageSquare, Send, X } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, DocEntry } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
@@ -30,18 +29,21 @@ import {
 export function Chatbot() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [docs, setDocs] = useState<DocEntry[]>([]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const handledNavigatePayloads = useRef<Set<string>>(new Set());
+  const handledDocsUpdates = useRef<Set<string>>(new Set());
+  const hasSeededNavigate = useRef(false);
 
   const { isChatOpen, setChatOpen, chatMessages, addChatMessage, locale } =
     useAppStore();
 
   const { toast } = useToast();
-  const [docs, setDocs] = useState<DocEntry[]>([]);
-  const handledNavigatePayloads = useRef<Set<string>>(new Set());
-  const hasSeededNavigate = useRef(false);
-  const handledDocsUpdates = useRef<Set<string>>(new Set());
+  const isArabic = locale === "ar";
 
+  // Smart links recommendations
   const recommendedSmartLinks = useMemo(() => {
     const latestInput = message.trim()
       ? message
@@ -63,14 +65,19 @@ export function Chatbot() {
       .slice(0, 3);
   }, [chatMessages, message]);
 
+  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatMessages]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  // Cleanup any in-flight requests on unmount
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
+  // Fetch docs list
   const fetchDocs = useCallback(async () => {
     try {
       const response = await fetch("/api/docs");
@@ -79,7 +86,7 @@ export function Chatbot() {
       if (Array.isArray(data.docs)) {
         setDocs(data.docs);
       }
-    } catch (error) {
+    } catch {
       toast({
         title: locale === "ar" ? "تعذر تحميل المستندات" : "Docs unavailable",
         description:
@@ -90,6 +97,7 @@ export function Chatbot() {
     }
   }, [toast, locale]);
 
+  // Open a selected doc
   const handleDocSelect = useCallback(
     (doc: DocEntry) => {
       if (doc.url) {
@@ -108,12 +116,14 @@ export function Chatbot() {
     [toast, locale]
   );
 
+  // Load docs when chat opens
   useEffect(() => {
     if (isChatOpen) {
       fetchDocs();
     }
   }, [isChatOpen, fetchDocs]);
 
+  // Refresh docs on docs-update payloads
   useEffect(() => {
     const latestUpdate = [...chatMessages]
       .reverse()
@@ -124,6 +134,7 @@ export function Chatbot() {
     }
   }, [chatMessages, fetchDocs]);
 
+  // Handle navigate-doc payloads
   useEffect(() => {
     if (!hasSeededNavigate.current) {
       chatMessages.forEach((msg) => {
@@ -143,6 +154,7 @@ export function Chatbot() {
     });
   }, [chatMessages, handleDocSelect]);
 
+  // Send message (supports JSON or SSE streaming)
   const handleSend = async (text?: string) => {
     const messageText = text ?? message;
     if (!messageText.trim() || isLoading) return;
@@ -158,6 +170,7 @@ export function Chatbot() {
     setMessage("");
     setIsLoading(true);
 
+    // Temp assistant message for streaming updates
     const assistantMessageId = (Date.now() + 1).toString();
     const tempAssistantMessage: ChatMessage = {
       id: assistantMessageId,
@@ -167,6 +180,7 @@ export function Chatbot() {
     };
     addChatMessage(tempAssistantMessage);
 
+    // Abort any previous request
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -191,6 +205,7 @@ export function Chatbot() {
 
       const contentType = response.headers.get("content-type") ?? "";
 
+      // JSON response (non-streaming)
       if (contentType.includes("application/json")) {
         const data = await response.json();
         if (data?.message) {
@@ -198,10 +213,7 @@ export function Chatbot() {
           useAppStore.setState((state) => ({
             chatMessages: state.chatMessages.map((msg) =>
               msg.id === assistantMessageId
-                ? {
-                    ...assistantMessage,
-                    id: assistantMessageId,
-                  }
+                ? { ...assistantMessage, id: assistantMessageId }
                 : msg
             ),
           }));
@@ -209,14 +221,15 @@ export function Chatbot() {
         return;
       }
 
+      // SSE streaming
       if (!response.body) throw new Error("No response body");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
-      let streamDone = false;
 
-      while (!streamDone) {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -227,13 +240,12 @@ export function Chatbot() {
           const data = line.slice(6).trim();
           if (!data) continue;
           if (data === "[DONE]") {
-            streamDone = true;
             break;
           }
           try {
             const parsed = JSON.parse(data);
             if (parsed?.content) {
-              accumulated += parsed.content;
+              accumulated += parsed.content as string;
               useAppStore.setState((state) => ({
                 chatMessages: state.chatMessages.map((msg) =>
                   msg.id === assistantMessageId
@@ -243,10 +255,10 @@ export function Chatbot() {
               }));
             }
             if (parsed?.error) {
-              throw new Error(parsed.error);
+              throw new Error(parsed.error as string);
             }
           } catch {
-            /* ignore partial lines */
+            // ignore partial lines
           }
         }
       }
@@ -260,7 +272,8 @@ export function Chatbot() {
           ),
         }));
       }
-    } catch (err) {
+    } catch {
+      // Replace temp message with friendly error
       useAppStore.setState((state) => ({
         chatMessages: state.chatMessages.map((msg) =>
           msg.id === assistantMessageId
@@ -288,10 +301,9 @@ export function Chatbot() {
     abortRef.current?.abort();
   };
 
-  const isArabic = locale === "ar";
-
   return (
     <>
+      {/* Floating button to open chat */}
       <AnimatePresence>
         {!isChatOpen && (
           <motion.div
@@ -319,175 +331,327 @@ export function Chatbot() {
         )}
       </AnimatePresence>
 
+      {/* Chat panel */}
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
+            initial={{ x: isArabic ? -400 : 400, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: isArabic ? -400 : 400, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className={cn(
+              "fixed top-0 bottom-0 z-50 w-full sm:w-[420px] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
+              isArabic ? "left-0" : "right-0"
+            )}
+            style={{ direction: isArabic ? "rtl" : "ltr" }}
+            data-testid="chat-panel"
           >
-            <div
-              className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-              onClick={closeChat}
-            />
-            <motion.div
-              initial={{ y: isArabic ? -40 : 40, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: isArabic ? -40 : 40, opacity: 0 }}
-              transition={{ type: "spring", damping: 24, stiffness: 220 }}
-              className="relative z-10 w-full max-w-4xl"
-            >
-              <Card
-                dir={isArabic ? "rtl" : "ltr"}
-                className="flex max-h-[80vh] flex-col overflow-hidden rounded-[2.5rem] border-white/60 bg-white/85 shadow-[0_42px_120px_-48px_rgba(255,90,0,0.6)] backdrop-blur-xl dark:bg-white/10"
-                data-testid="chat-panel"
-              >
-                <CardHeader className="space-y-4 bg-gradient-to-br from-[#FFE7D6] via-[#FFE0CC] to-[#FFD5BA] px-8 py-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <CardTitle className="flex items-center gap-3 text-xl">
-                      <span className="flex h-12 w-12 items-center justify-center rounded-[1.5rem] bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_24px_60px_-30px_rgba(255,90,0,0.75)]">
-                        <MessageSquare className="h-5 w-5" />
-                      </span>
-                      <span>{t("chatTitle", locale)}</span>
-                    </CardTitle>
-                    <div className="flex items-center gap-3">
-                      <DocsNavigator
-                        docs={docs}
-                        locale={locale}
-                        onSelect={handleDocSelect}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={closeChat}
-                        className="rounded-full hover:bg-white/60"
-                        data-testid="button-close-chat"
-                      >
-                        <X className="h-5 w-5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {isArabic
-                      ? "تحدث مباشرة مع المساعد ثنائي اللغة، أو اختر مستندًا لفتحه في تبويب جديد."
-                      : "Chat with the bilingual assistant or open a doc instantly in a new tab."}
-                  </p>
-                </CardHeader>
+            <Card className="flex h-full flex-col rounded-none border-0 bg-white/75 backdrop-blur-2xl sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-white/50 pb-4 dark:border-white/10">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white">
+                    <MessageSquare className="h-5 w-5" />
+                  </span>
+                  {t("chatTitle", locale)}
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <DocsNavigator
+                    docs={docs}
+                    locale={locale}
+                    onSelect={handleDocSelect}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={closeChat}
+                    className="hover-elevate active-elevate-2"
+                    data-testid="button-close-chat"
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                </div>
+              </CardHeader>
 
-                <CardContent className="flex-1 overflow-hidden px-0">
-                  <ScrollArea className="h-full px-8" ref={scrollRef}>
-                    <div className="space-y-5 py-6">
-                      {chatMessages.length === 0 && (
+              <CardContent className="flex-1 overflow-hidden p-0">
+                <ScrollArea className="h-full p-5" ref={scrollRef}>
+                  <div className="space-y-4">
+                    {chatMessages.length === 0 && (
+                      <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
+                        <MessageSquare className="mx-auto mb-4 h-12 w-12 opacity-70" />
+                        <p className="text-sm">
+                          {t("chatPlaceholder", locale)}
+                        </p>
+                      </div>
+                    )}
+
+                    {chatMessages.map((msg) => {
+                      const isUser = msg.role === "user";
+                      const isErrorMessage =
+                        msg.role === "assistant" &&
+                        /عذرًا|sorry/i.test(msg.content);
+
+                      return (
                         <motion.div
+                          key={msg.id}
                           initial={{ opacity: 0, y: 12 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="rounded-[2rem] border border-dashed border-white/60 bg-white/75 px-8 py-12 text-center text-muted-foreground shadow-inner backdrop-blur"
+                          transition={{ duration: 0.2, ease: "easeOut" }}
+                          className={cn(
+                            "flex w-full",
+                            isUser ? "justify-end" : "justify-start"
+                          )}
                         >
-                          <MessageSquare className="mx-auto mb-4 h-12 w-12 text-primary/60" />
-                          <p className="text-sm">{t("chatPlaceholder", locale)}</p>
-                        </motion.div>
-                      )}
-
-                      {chatMessages.map((msg) => {
-                        const isUser = msg.role === "user";
-                        const isErrorMessage =
-                          msg.role === "assistant" &&
-                          /عذرًا|sorry/i.test(msg.content);
-
-                        return (
-                          <motion.div
-                            key={msg.id}
-                            initial={{ opacity: 0, y: 12 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.2, ease: "easeOut" }}
+                          <div
                             className={cn(
-                              "flex w-full",
-                              isUser ? "justify-end" : "justify-start"
+                              "max-w-[80%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
+                              isUser
+                                ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
+                                : "bg-white/90 text-foreground backdrop-blur",
+                              isErrorMessage && "ring-2 ring-destructive/60"
                             )}
+                            data-testid={`chat-message-${msg.role}`}
                           >
-                            <div
-                              className={cn(
-                                "max-w-[80%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
-                                isUser
-                                  ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
-                                  : "bg-white/90 text-foreground backdrop-blur",
-                                isErrorMessage && "ring-2 ring-destructive/60"
-                              )}
-                              data-testid={`chat-message-${msg.role}`}
-                            >
-                              <div className="space-y-2 text-sm leading-7">
-                                {parseMessageSegments(msg.content).map(
-                                  (segment, index) =>
-                                    segment.type === "link" ? (
-                                      <SmartLinkPill
-                                        key={`${msg.id}-link-${index}`}
-                                        linkId={segment.linkId}
-                                        className={cn(
-                                          "inline-flex",
-                                          isUser && "bg-white/90 text-foreground"
-                                        )}
-                                      />
-                                    ) : (
-                                      <span
-                                        key={`${msg.id}-text-${index}`}
-                                        className="block whitespace-pre-wrap break-words"
-                                      >
-                                        {segment.content}
-                                      </span>
-                                    )
-                                )}
-                              </div>
-
-                              {msg.payload?.kind === "prorata" && (
-                                <ProrataSummaryCard
-                                  data={msg.payload.data}
-                                  locale={msg.payload.locale}
-                                />
+                            <div className="space-y-2 text-sm leading-7">
+                              {parseMessageSegments(msg.content).map(
+                                (segment, index) =>
+                                  segment.type === "link" ? (
+                                    <SmartLinkPill
+                                      key={`${msg.id}-link-${index}`}
+                                      linkId={segment.linkId}
+                                      className={cn(
+                                        "inline-flex",
+                                        isUser && "bg-white/90 text-foreground"
+                                      )}
+                                    />
+                                  ) : (
+                                    <span
+                                      key={`${msg.id}-text-${index}`}
+                                      className="block whitespace-pre-wrap break-words"
+                                    >
+                                      {segment.content}
+                                    </span>
+                                  )
                               )}
                             </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
 
-                <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/80 px-8 py-6 backdrop-blur">
-                  {quickReplies.length > 0 && chatMessages.length === 0 && (
-                    <div className="flex w-full flex-wrap items-center gap-2">
-                      <span className="text-xs font-semibold text-muted-foreground">
-                        {t("quickReplies", locale)}
-                      </span>
-                      {quickReplies.map((reply) => (
-                        <Badge
-                          key={reply.id}
-                          className="cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:-translate-y-1"
-                          onClick={() => handleQuickReply(reply.text[locale])}
-                          data-testid={`quick-reply-${reply.id}`}
-                        >
-                          {reply.text[locale]}
-                        </Badge>
+                            {msg.payload?.kind === "prorata" && (
+                              <ProrataSummaryCard
+                                data={msg.payload.data}
+                                locale={msg.payload.locale}
+                              />
+                            )}
+                          </div>
+
+                          <span className="mt-2 block text-xs opacity-70">
+                            {new Date(msg.timestamp).toLocaleTimeString(
+                              isArabic ? "ar-JO" : "en-US",
+                              { hour: "2-digit", minute: "2-digit" }
+                            )}
+                          </span>
+                        </motion.div>
+                      );
+                    })}
+
+                    {isLoading && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex justify-start"
+                      >
+                        <div className="flex items-center gap-3 rounded-3xl bg-white/80 px-4 py-3 text-foreground backdrop-blur dark:bg-white/10">
+                          <span className="loading-ring" />
+                          <span className="text-sm">
+                            {t("thinking", locale)}
+                          </span>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+
+              <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/80 px-5 py-4 backdrop-blur">
+                {/* Quick Replies */}
+                {quickReplies.length > 0 && (
+                  <div className="flex w-full flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      {t("quickReplies", locale)}
+                    </span>
+                    {quickReplies.map((reply) => (
+                      <Badge
+                        key={reply.id}
+                        variant="secondary"
+                        className="cursor-pointer rounded-full bg-white px-3 py-2 text-xs font-medium text-foreground shadow-sm transition hover:-translate-y-1"
+                        onClick={() => handleQuickReply(reply.text[locale])}
+                        data-testid={`quick-reply-${reply.id}`}
+                      >
+                        {reply.text[locale]}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {/* Recommended Smart Links */}
+                {recommendedSmartLinks.length > 0 && (
+                  <div className="w-full">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+                      {locale === "ar"
+                        ? "روابط أورنج"
+                        : "Official Orange links"}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {recommendedSmartLinks.map((linkId) => (
+                        <SmartLinkPill key={linkId} linkId={linkId} />
                       ))}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {recommendedSmartLinks.length > 0 && (
-                    <div className="w-full">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                        {locale === "ar" ? "روابط أورنج" : "Official Orange links"}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {recommendedSmartLinks.map((linkId) => (
-                          <SmartLinkPill key={linkId} linkId={linkId} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                {/* Input */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSend();
+                  }}
+                  className="flex w-full items-center gap-3 rounded-full border border-white/70 bg-white px-4 py-2 shadow-[0_18px_40px_-30px_rgba(255,90,0,0.35)]"
+                >
+                  <Input
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder={t("chatPlaceholder", locale)}
+                    disabled={isLoading}
+                    className="h-12 flex-1 border-0 bg-transparent px-1 text-sm focus-visible:ring-0"
+                    data-testid="input-chat-message"
+                  />
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={!message.trim() || isLoading}
+                    className="h-11 w-11 rounded-full bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_20px_50px_-30px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
+                    data-testid="button-send-message"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </form>
+              </CardFooter>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
 
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleSend();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-full border border-white/70 bg-white
+// ===== Helpers =====
+
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "link"; linkId: SmartLinkId };
+
+function parseMessageSegments(content: string): MessageSegment[] {
+  const regex = /\[\[link:([a-z0-9-]+)\]\]/gi;
+  const segments: MessageSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({
+        type: "text",
+        content: content.slice(lastIndex, match.index),
+      });
+    }
+    const linkId = match[1]?.toLowerCase() as SmartLinkId;
+    segments.push({ type: "link", linkId });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", content: content.slice(lastIndex) });
+  }
+
+  if (segments.length === 0) {
+    return [{ type: "text", content }];
+  }
+
+  return segments;
+}
+
+// ===== Prorata widgets =====
+
+type ProrataPayload = Extract<
+  NonNullable<ChatMessage["payload"]>,
+  { kind: "prorata" }
+>;
+
+function ProrataSummaryCard({
+  data,
+  locale,
+}: {
+  data: ProrataPayload["data"];
+  locale: "en" | "ar";
+}) {
+  const isArabic = locale === "ar";
+  const label = (en: string, ar: string) => (isArabic ? ar : en);
+
+  return (
+    <div className="space-y-4 rounded-[1.8rem] border border-white/70 bg-gradient-to-br from-[#FFECD9]/80 via-[#FFE6CE]/85 to-[#FFD9B7]/85 p-5 text-sm text-foreground shadow-inner backdrop-blur">
+      <div className="grid gap-3 md:grid-cols-2">
+        <ProrataMetric label={label("Period", "الفترة")} value={data.period} />
+        <ProrataMetric
+          label={label("Pro-days", "أيام البروراتا")}
+          value={`${data.proDays} · ${data.percent}`}
+        />
+        <ProrataMetric
+          label={label("Monthly (net)", "الاشتراك الشهري")}
+          value={data.monthlyNet}
+        />
+        <ProrataMetric
+          label={label("Pro-rata (net)", "قيمة البروراتا")}
+          value={data.prorataNet}
+        />
+        <ProrataMetric
+          label={label("Invoice date", "تاريخ الفاتورة")}
+          value={data.invoiceDate}
+        />
+        <ProrataMetric
+          label={label("Coverage until", "تغطية حتى")}
+          value={data.coverageUntil}
+        />
+      </div>
+      {typeof data.fullInvoiceGross === "number" && (
+        <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-xs font-medium">
+          {label("Full invoice (gross)", "الفاتورة الإجمالية")}: JD{" "}
+          {data.fullInvoiceGross.toFixed(3)}
+        </div>
+      )}
+      <div className="space-y-3 rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 text-sm shadow-inner">
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+          {label("Copy-ready script", "النص الجاهز للنسخ")}
+        </p>
+        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-6 text-foreground">
+          {data.script}
+        </pre>
+        <div className="flex justify-end">
+          <CopyButton
+            text={data.script}
+            label={label("Copy", "نسخ")}
+            variant="secondary"
+            className="rounded-full bg-gradient-to-r from-[#FF7A00] via-[#FF5400] to-[#FF3C00] px-4 py-2 text-white shadow-[0_18px_42px_-28px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProrataMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[1.6rem] border border-white/70 bg-white/85 px-4 py-3 shadow-[0_16px_36px_-28px_rgba(0,0,0,0.18)]">
+      <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
