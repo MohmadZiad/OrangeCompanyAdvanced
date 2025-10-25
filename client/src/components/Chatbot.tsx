@@ -35,10 +35,8 @@ import {
 
 /**
  * Chatbot.tsx — Orange style (no attachments) + Maximize/Restore
- * - إزالة المرفقات بالكامل.
- * - وضع تكبير يغطي الشاشة (نافذة كبيرة) + زر Open Maximize.
- * - حذف رسالة مفردة + حذف المحادثة مع تأكيد.
- * - SSE/JSON كما هو + SmartLinks + DocsNavigator + RTL.
+ * Production-ready: clean code, RTL, SSE/JSON, deep-link smart links, docs navigator,
+ * single-message delete + full chat clear with confirmation, lazy effects, robust abort.
  */
 
 export function Chatbot() {
@@ -60,7 +58,7 @@ export function Chatbot() {
   const { toast } = useToast();
   const isArabic = locale === "ar";
 
-  // Smart links recommendations (top-3 based on latest input)
+  // ===== Smart links recommendations (top-3 based on latest input) =====
   const recommendedSmartLinks = useMemo(() => {
     const latestInput = message.trim()
       ? message
@@ -77,17 +75,17 @@ export function Chatbot() {
       .slice(0, 3);
   }, [chatMessages, message]);
 
-  // Auto-scroll on new messages
+  // ===== Auto-scroll on new messages =====
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [chatMessages, isLoading]);
 
-  // Cleanup in-flight requests on unmount
+  // ===== Cleanup in-flight requests on unmount =====
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // Fetch docs list
+  // ===== Fetch docs list =====
   const fetchDocs = useCallback(async () => {
     try {
       const response = await fetch("/api/docs");
@@ -105,7 +103,7 @@ export function Chatbot() {
     }
   }, [toast, locale]);
 
-  // Open a selected doc
+  // ===== Open a selected doc =====
   const handleDocSelect = useCallback(
     (doc: DocEntry) => {
       if (doc.url) {
@@ -124,12 +122,12 @@ export function Chatbot() {
     [toast, locale]
   );
 
-  // Load docs when chat opens
+  // ===== Load docs when chat opens =====
   useEffect(() => {
     if (isChatOpen) fetchDocs();
   }, [isChatOpen, fetchDocs]);
 
-  // Refresh docs on docs-update payloads
+  // ===== Refresh docs on docs-update payloads =====
   useEffect(() => {
     const latestUpdate = [...chatMessages]
       .reverse()
@@ -140,7 +138,7 @@ export function Chatbot() {
     }
   }, [chatMessages, fetchDocs]);
 
-  // Handle navigate-doc payloads
+  // ===== Handle navigate-doc payloads =====
   useEffect(() => {
     if (!hasSeededNavigate.current) {
       chatMessages.forEach((m) => {
@@ -481,11 +479,11 @@ export function Chatbot() {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.2, ease: "easeOut" }}
                           className={cn(
-                            "flex w-full",
+                            "flex w/full",
                             isUser ? "justify-end" : "justify-start"
                           )}
                         >
-                          <div className="relative">
+                          <div className="relative group">
                             <div
                               className={cn(
                                 "max-w-[82%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
@@ -665,7 +663,7 @@ export function Chatbot() {
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      ✅ Ready
+                     🧡 Ready
                     </span>
                   )}
                 </div>
@@ -710,8 +708,8 @@ export function Chatbot() {
                       >
                         <Button
                           onClick={() => {
-                            clearChat(); // <-- يحذف كل الرسائل
-                            setShowConfirm(false); // <-- يغلق النافذة
+                            clearChat();
+                            setShowConfirm(false);
                           }}
                           className="flex-1 rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white"
                           data-testid="button-confirm-clear"
@@ -770,7 +768,7 @@ function parseMessageSegments(content: string): MessageSegment[] {
   return segments.length === 0 ? [{ type: "text", content }] : segments;
 }
 
-/* ===== Prorata widgets (unchanged) ===== */
+/* ===== Prorata widgets ===== */
 
 type ProrataPayload = Extract<
   NonNullable<ChatMessage["payload"]>,
