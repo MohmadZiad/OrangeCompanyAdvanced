@@ -78,18 +78,6 @@ export const chatPayloadSchema = z.discriminatedUnion("kind", [
     }),
   }),
   z.object({
-    kind: z.literal("chat-error"),
-    locale: z.enum(["en", "ar"]),
-    data: z.object({
-      reason: z.string(),
-      hint: z.string(),
-      retryLabel: z.string(),
-      supportLabel: z.string(),
-      retryMessage: z.string().optional(),
-      supportUrl: z.string().url().optional(),
-    }),
-  }),
-  z.object({
     kind: z.literal("navigate-doc"),
     locale: z.enum(["en", "ar"]),
     doc: docEntrySchema,
