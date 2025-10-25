@@ -11,7 +11,14 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAppStore } from "@/lib/store";
 import { t, quickReplies } from "@/lib/i18n";
-import { MessageSquare, Send, X } from "lucide-react";
+import {
+  MessageSquare,
+  Send,
+  X,
+  Trash2,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, DocEntry } from "@shared/schema";
@@ -26,10 +33,20 @@ import {
   type SmartLinkId,
 } from "@/lib/smartLinks";
 
+/**
+ * Chatbot.tsx — Orange style (no attachments) + Maximize/Restore
+ * - إزالة المرفقات بالكامل.
+ * - وضع تكبير يغطي الشاشة (نافذة كبيرة) + زر Open Maximize.
+ * - حذف رسالة مفردة + حذف المحادثة مع تأكيد.
+ * - SSE/JSON كما هو + SmartLinks + DocsNavigator + RTL.
+ */
+
 export function Chatbot() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [docs, setDocs] = useState<DocEntry[]>([]);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -65,7 +82,7 @@ export function Chatbot() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [chatMessages]);
+  }, [chatMessages, isLoading]);
 
   // Cleanup in-flight requests on unmount
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -142,162 +159,204 @@ export function Chatbot() {
     });
   }, [chatMessages, handleDocSelect]);
 
-  // Send message (supports JSON or SSE streaming)
-  const handleSend = async (text?: string) => {
-    const messageText = text ?? message;
-    if (!messageText.trim() || isLoading) return;
+  // ===== Deletion helpers =====
+  const deleteMessage = useCallback((id: string) => {
+    useAppStore.setState((state) => ({
+      chatMessages: state.chatMessages.filter((m) => m.id !== id),
+    }));
+  }, []);
 
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: "user",
-      content: messageText,
-      timestamp: Date.now(),
-    };
+  const clearChat = useCallback(() => {
+    useAppStore.setState({ chatMessages: [] });
+  }, []);
 
-    addChatMessage(userMessage);
-    setMessage("");
-    setIsLoading(true);
+  // ===== Send message (JSON or SSE) =====
+  const handleSend = useCallback(
+    async (text?: string) => {
+      const messageText = text ?? message;
+      if (!messageText.trim() || isLoading) return;
 
-    // Temp assistant message for streaming
-    const assistantMessageId = (Date.now() + 1).toString();
-    const tempAssistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "",
-      timestamp: Date.now(),
-    };
-    addChatMessage(tempAssistantMessage);
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: "user",
+        content: messageText,
+        timestamp: Date.now(),
+      };
 
-    // Abort previous
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
+      addChatMessage(userMessage);
+      setMessage("");
+      setIsLoading(true);
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...chatMessages, userMessage].map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: m.timestamp,
-          })),
-          locale,
-        }),
-        signal: ac.signal,
-      });
+      // Temp assistant message for streaming
+      const assistantMessageId = (Date.now() + 1).toString();
+      const tempAssistantMessage: ChatMessage = {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+      };
+      addChatMessage(tempAssistantMessage);
 
-      if (!response.ok) throw new Error("Failed to get response");
+      // Abort previous
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
 
-      const contentType = response.headers.get("content-type") ?? "";
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [...chatMessages, userMessage].map((m) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              timestamp: m.timestamp,
+            })),
+            locale,
+          }),
+          signal: ac.signal,
+        });
 
-      // JSON response (non-streaming)
-      if (contentType.includes("application/json")) {
-        const data = await response.json();
-        if (data?.message) {
-          const assistantMessage = data.message as ChatMessage;
+        if (!response.ok) throw new Error("Failed to get response");
+
+        const contentType = response.headers.get("content-type") ?? "";
+
+        // JSON response (non-streaming)
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          if (data?.message) {
+            const assistantMessage = data.message as ChatMessage;
+            useAppStore.setState((state) => ({
+              chatMessages: state.chatMessages.map((msg) =>
+                msg.id === assistantMessageId
+                  ? { ...assistantMessage, id: assistantMessageId }
+                  : msg
+              ),
+            }));
+          }
+          return;
+        }
+
+        // SSE streaming
+        if (!response.body) throw new Error("No response body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = "";
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (!data) continue;
+            if (data === "[DONE]") break;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed?.content) {
+                accumulated += parsed.content as string;
+                useAppStore.setState((state) => ({
+                  chatMessages: state.chatMessages.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: accumulated }
+                      : msg
+                  ),
+                }));
+              }
+              if (parsed?.error) throw new Error(parsed.error as string);
+            } catch {
+              /* ignore partial lines */
+            }
+          }
+        }
+
+        if (accumulated) {
           useAppStore.setState((state) => ({
             chatMessages: state.chatMessages.map((msg) =>
               msg.id === assistantMessageId
-                ? { ...assistantMessage, id: assistantMessageId }
+                ? { ...msg, content: accumulated }
                 : msg
             ),
           }));
         }
-        return;
-      }
-
-      // SSE streaming
-      if (!response.body) throw new Error("No response body");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = "";
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (!data) continue;
-          if (data === "[DONE]") break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed?.content) {
-              accumulated += parsed.content as string;
-              useAppStore.setState((state) => ({
-                chatMessages: state.chatMessages.map((msg) =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: accumulated }
-                    : msg
-                ),
-              }));
-            }
-            if (parsed?.error) throw new Error(parsed.error as string);
-          } catch {
-            /* ignore partial lines */
-          }
-        }
-      }
-
-      if (accumulated) {
+      } catch {
+        // Replace temp message with friendly error
         useAppStore.setState((state) => ({
           chatMessages: state.chatMessages.map((msg) =>
             msg.id === assistantMessageId
-              ? { ...msg, content: accumulated }
+              ? {
+                  ...msg,
+                  content:
+                    locale === "ar"
+                      ? "عذرًا، حدث خطأ أثناء المعالجة. حاول مرة أخرى."
+                      : "Sorry, I encountered an error. Please try again.",
+                }
               : msg
           ),
         }));
+      } finally {
+        setIsLoading(false);
       }
-    } catch {
-      // Replace temp message with friendly error
-      useAppStore.setState((state) => ({
-        chatMessages: state.chatMessages.map((msg) =>
-          msg.id === assistantMessageId
-            ? {
-                ...msg,
-                content:
-                  locale === "ar"
-                    ? "عذرًا، حدث خطأ أثناء المعالجة. حاول مرة أخرى."
-                    : "Sorry, I encountered an error. Please try again.",
-              }
-            : msg
-        ),
-      }));
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+    [message, isLoading, addChatMessage, chatMessages, locale]
+  );
 
-  const handleQuickReply = (replyText: string) => handleSend(replyText);
+  const handleQuickReply = useCallback(
+    (replyText: string) => handleSend(replyText),
+    [handleSend]
+  );
 
-  const closeChat = () => {
+  const openChat = useCallback(
+    (max = false) => {
+      setChatOpen(true);
+      setIsMaximized(!!max);
+    },
+    [setChatOpen]
+  );
+
+  const closeChat = useCallback(() => {
     setChatOpen(false);
+    setIsMaximized(false);
     abortRef.current?.abort();
-  };
+  }, [setChatOpen]);
+
+  // Labels
+  const lblMax = isArabic ? "تكبير" : "Maximize";
+  const lblRestore = isArabic ? "استعادة" : "Restore";
+  const lblOpenMax = isArabic ? "فتح مكبّر" : "Open Maximize";
 
   return (
     <>
-      {/* Floating button to open chat */}
+      {/* Floating actions */}
       <AnimatePresence>
         {!isChatOpen && (
           <motion.div
-            initial={{ scale: 0, opacity: 0 }}
+            initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            className="fixed bottom-6 right-6 z-40"
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="fixed bottom-6 right-6 z-40 flex items-center gap-3"
             style={{ direction: "ltr" }}
           >
+            {/* Open Maximize pill */}
+            <Button
+              onClick={() => openChat(true)}
+              className="hidden sm:inline-flex h-10 rounded-full bg-white/90 px-4 text-sm font-medium text-foreground shadow-[0_16px_36px_-24px_rgba(0,0,0,0.25)] hover:bg-white"
+              aria-label={lblOpenMax}
+            >
+              <Maximize2 className="mr-2 h-4 w-4" />
+              {lblOpenMax}
+            </Button>
+
+            {/* Regular round button */}
             <Button
               size="icon"
-              onClick={() => setChatOpen(true)}
+              onClick={() => openChat(false)}
               className="h-16 w-16 rounded-full bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] shadow-[0_28px_60px_-28px_rgba(255,90,0,0.75)] hover:-translate-y-1"
               data-testid="button-open-chat"
               aria-label={t("help", locale)}
@@ -317,37 +376,77 @@ export function Chatbot() {
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
-            initial={{ x: isArabic ? -400 : 400, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: isArabic ? -400 : 400, opacity: 0 }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 18 }}
+            transition={{ type: "spring", damping: 28, stiffness: 210 }}
             className={cn(
-              "fixed top-0 bottom-0 z-50 w-full sm:w-[420px] shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
-              isArabic ? "left-0" : "right-0"
+              "fixed inset-0 z-50 flex",
+              isMaximized
+                ? "items-center justify-center p-2 sm:p-6"
+                : isArabic
+                ? "items-stretch justify-start"
+                : "items-stretch justify-end"
             )}
             style={{ direction: isArabic ? "rtl" : "ltr" }}
             data-testid="chat-panel"
           >
-            <Card className="flex h-full flex-col rounded-none border-0 bg-white/75 backdrop-blur-2xl sm:rounded-l-[2.5rem] sm:border sm:border-white/40 dark:bg-white/10">
+            <Card
+              className={cn(
+                "flex h-full flex-col border-0 bg-white/75 backdrop-blur-2xl dark:bg-white/10 shadow-[0_30px_70px_-40px_rgba(0,0,0,0.55)]",
+                isMaximized
+                  ? "w-[min(1200px,96vw)] h-[min(90vh,96vh)] rounded-[2rem] border border-white/40"
+                  : "w-full sm:w-[520px] md:w-[560px] sm:rounded-l-[2.5rem] sm:border sm:border-white/40"
+              )}
+            >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-white/50 pb-4 dark:border-white/10">
-                <CardTitle className="flex items-center gap-2 text-lg">
+                <CardTitle className="flex items-center gap-2 text-[1.05rem]">
                   <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white">
                     <MessageSquare className="h-5 w-5" />
                   </span>
                   {t("chatTitle", locale)}
                 </CardTitle>
-                <div className="flex items-center gap-2">
+
+                <div className="flex items-center gap-1 sm:gap-2">
+                  {/* Toggle Maximize/Restore */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsMaximized((v) => !v)}
+                    className="rounded-full px-3 hover:bg-white/70"
+                    aria-label={isMaximized ? lblRestore : lblMax}
+                    data-testid="button-toggle-maximize"
+                  >
+                    {isMaximized ? (
+                      <>
+                        <Minimize2 className="h-4 w-4" />
+                        <span className="ml-2 hidden sm:inline">
+                          {lblRestore}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="h-4 w-4" />
+                        <span className="ml-2 hidden sm:inline">{lblMax}</span>
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Docs navigator */}
                   <DocsNavigator
                     docs={docs}
                     locale={locale}
                     onSelect={handleDocSelect}
                   />
+
+                  {/* Close */}
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={closeChat}
                     className="hover-elevate active-elevate-2"
                     data-testid="button-close-chat"
+                    aria-label={isArabic ? "إغلاق" : "Close"}
                   >
                     <X className="h-5 w-5" />
                   </Button>
@@ -355,7 +454,10 @@ export function Chatbot() {
               </CardHeader>
 
               <CardContent className="flex-1 overflow-hidden p-0">
-                <ScrollArea className="h-full p-5" ref={scrollRef}>
+                <ScrollArea
+                  className={cn("h-full", isMaximized ? "p-6" : "p-5")}
+                  ref={scrollRef}
+                >
                   <div className="space-y-4">
                     {chatMessages.length === 0 && (
                       <div className="rounded-3xl border border-dashed border-white/50 bg-white/60 py-10 text-center text-muted-foreground backdrop-blur dark:bg-white/5">
@@ -383,56 +485,76 @@ export function Chatbot() {
                             isUser ? "justify-end" : "justify-start"
                           )}
                         >
-                          <div
-                            className={cn(
-                              "max-w-[80%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
-                              isUser
-                                ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
-                                : "bg-white/90 text-foreground backdrop-blur",
-                              isErrorMessage && "ring-2 ring-destructive/60"
-                            )}
-                            data-testid={`chat-message-${msg.role}`}
-                          >
-                            <div className="space-y-2 text-sm leading-7">
-                              {parseMessageSegments(msg.content).map(
-                                (segment, index) =>
-                                  segment.type === "link" ? (
-                                    <SmartLinkPill
-                                      key={`${msg.id}-link-${index}`}
-                                      linkId={segment.linkId}
-                                      className={cn(
-                                        "inline-flex",
-                                        isUser && "bg-white/90 text-foreground"
-                                      )}
-                                    />
-                                  ) : (
-                                    <span
-                                      key={`${msg.id}-text-${index}`}
-                                      className="block whitespace-pre-wrap break-words"
-                                    >
-                                      {segment.content}
-                                    </span>
-                                  )
+                          <div className="relative">
+                            <div
+                              className={cn(
+                                "max-w-[82%] space-y-3 rounded-[1.9rem] px-5 py-4 shadow-[0_18px_44px_-32px_rgba(0,0,0,0.25)]",
+                                isUser
+                                  ? "bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white"
+                                  : "bg-white/90 text-foreground backdrop-blur",
+                                isErrorMessage && "ring-2 ring-destructive/60"
+                              )}
+                              data-testid={`chat-message-${msg.role}`}
+                            >
+                              {/* Delete single message */}
+                              <button
+                                onClick={() => deleteMessage(msg.id)}
+                                className={cn(
+                                  "absolute top-2 hidden rounded-full bg-white/80 p-1 text-foreground shadow-sm group-hover:block",
+                                  isUser ? "left-2" : "right-2"
+                                )}
+                                title={
+                                  isArabic ? "حذف الرسالة" : "Delete message"
+                                }
+                                aria-label={
+                                  isArabic ? "حذف الرسالة" : "Delete message"
+                                }
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+
+                              {/* Content + SmartLink pills parsing */}
+                              <div className="space-y-2 text-[0.95rem] leading-7">
+                                {parseMessageSegments(msg.content).map(
+                                  (segment, index) =>
+                                    segment.type === "link" ? (
+                                      <SmartLinkPill
+                                        key={`${msg.id}-link-${index}`}
+                                        linkId={segment.linkId}
+                                        className={cn(
+                                          "inline-flex",
+                                          isUser &&
+                                            "bg-white/90 text-foreground"
+                                        )}
+                                      />
+                                    ) : (
+                                      <span
+                                        key={`${msg.id}-text-${index}`}
+                                        className="block whitespace-pre-wrap break-words"
+                                      >
+                                        {segment.content}
+                                      </span>
+                                    )
+                                )}
+                              </div>
+
+                              {msg.payload?.kind === "prorata" && (
+                                <ProrataSummaryCard
+                                  data={msg.payload.data}
+                                  locale={msg.payload.locale}
+                                />
                               )}
                             </div>
-
-                            {msg.payload?.kind === "prorata" && (
-                              <ProrataSummaryCard
-                                data={msg.payload.data}
-                                locale={msg.payload.locale}
-                              />
-                            )}
+                            <span className="mt-2 block text-xs opacity-70">
+                              {new Date(msg.timestamp).toLocaleTimeString(
+                                isArabic ? "ar-JO" : "en-US",
+                                {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                }
+                              )}
+                            </span>
                           </div>
-
-                          <span className="mt-2 block text-xs opacity-70">
-                            {new Date(msg.timestamp).toLocaleTimeString(
-                              isArabic ? "ar-JO" : "en-US",
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              }
-                            )}
-                          </span>
                         </motion.div>
                       );
                     })}
@@ -455,7 +577,12 @@ export function Chatbot() {
                 </ScrollArea>
               </CardContent>
 
-              <CardFooter className="flex flex-col gap-5 border-t border-white/70 bg-white/80 px-5 py-4 backdrop-blur">
+              <CardFooter
+                className={cn(
+                  "flex flex-col gap-5 border-t border-white/70 bg-white/80 px-5 py-4 backdrop-blur",
+                  isMaximized && "px-6"
+                )}
+              >
                 {/* Quick Replies */}
                 {quickReplies.length > 0 && (
                   <div className="flex w-full flex-wrap items-center gap-2">
@@ -492,7 +619,7 @@ export function Chatbot() {
                   </div>
                 )}
 
-                {/* Input */}
+                {/* Input row */}
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -514,12 +641,97 @@ export function Chatbot() {
                     disabled={!message.trim() || isLoading}
                     className="h-11 w-11 rounded-full bg-gradient-to-br from-[#FF7A00] via-[#FF5400] to-[#FF3C00] text-white shadow-[0_20px_50px_-30px_rgba(255,90,0,0.65)] hover:from-[#FF6A00] hover:to-[#FF3C00]"
                     data-testid="button-send-message"
+                    aria-label={t("send", locale)}
                   >
                     <Send className="h-4 w-4" />
                   </Button>
                 </form>
+
+                {/* Danger zone: clear chat */}
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="secondary"
+                    className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                    onClick={() => setShowConfirm(true)}
+                    data-testid="button-open-clear"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {locale === "ar" ? "حذف المحادثة" : "Clear chat"}
+                  </Button>
+
+                  {isLoading ? (
+                    <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="loading-ring" /> {t("thinking", locale)}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      ✅ Ready
+                    </span>
+                  )}
+                </div>
               </CardFooter>
             </Card>
+
+            {/* Clear confirmation modal */}
+            <AnimatePresence>
+              {showConfirm && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[60] bg-black/40"
+                  onClick={() => setShowConfirm(false)}
+                >
+                  <div
+                    className="absolute inset-x-0 bottom-0 sm:inset-0 sm:flex sm:items-center sm:justify-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <motion.div
+                      initial={{ y: 40 }}
+                      animate={{ y: 0 }}
+                      exit={{ y: 40 }}
+                      className="mx-auto w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+                      role="dialog"
+                      aria-modal="true"
+                    >
+                      <h3 className="mb-2 text-base font-semibold">
+                        {locale === "ar" ? "تأكيد الحذف" : "Confirm deletion"}
+                      </h3>
+                      <p className="mb-4 text-sm text-muted-foreground">
+                        {locale === "ar"
+                          ? "هل أنت متأكد من حذف جميع الرسائل؟ لا يمكن التراجع."
+                          : "Are you sure you want to delete all messages? This cannot be undone."}
+                      </p>
+                      <div
+                        className={cn(
+                          "flex gap-2",
+                          isArabic ? "flex-row-reverse" : ""
+                        )}
+                      >
+                        <Button
+                          onClick={() => {
+                            clearChat(); // <-- يحذف كل الرسائل
+                            setShowConfirm(false); // <-- يغلق النافذة
+                          }}
+                          className="flex-1 rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white"
+                          data-testid="button-confirm-clear"
+                        >
+                          {locale === "ar" ? "تأكيد" : "Confirm"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => setShowConfirm(false)}
+                          className="flex-1 rounded-full bg-gray-100 px-4 py-2 text-sm font-medium"
+                          data-testid="button-cancel-clear"
+                        >
+                          {locale === "ar" ? "إلغاء" : "Cancel"}
+                        </Button>
+                      </div>
+                    </motion.div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
@@ -527,7 +739,7 @@ export function Chatbot() {
   );
 }
 
-/* ===== Helpers ===== */
+/* ===== Helpers (link parsing) ===== */
 
 type MessageSegment =
   | { type: "text"; content: string }
@@ -558,7 +770,7 @@ function parseMessageSegments(content: string): MessageSegment[] {
   return segments.length === 0 ? [{ type: "text", content }] : segments;
 }
 
-/* ===== Prorata widgets ===== */
+/* ===== Prorata widgets (unchanged) ===== */
 
 type ProrataPayload = Extract<
   NonNullable<ChatMessage["payload"]>,
@@ -612,15 +824,12 @@ function ProrataSummaryCard({
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
           {label("Copy-ready script", "النص الجاهز للنسخ")}
         </p>
-
-        {/* ⬇️ عرض فقرة واحدة نظيفة بدل <pre> */}
         <p
           dir={isArabic ? "rtl" : "ltr"}
           className="max-h-48 overflow-y-auto text-xs leading-6 whitespace-normal text-foreground"
         >
           {data.script}
         </p>
-
         <div className="flex justify-end">
           <CopyButton
             text={data.script}

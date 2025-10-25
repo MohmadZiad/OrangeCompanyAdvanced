@@ -1,7 +1,7 @@
 // client/src/components/ProRataCalculator.tsx
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Percent } from "lucide-react";
+import { Percent, Copy, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,15 +10,14 @@ import {
   ymd,
   addMonthsUTC,
   formatProrataOutput,
-  buildScript, // ⬅️ نستخدمه للسكربت
-  fmt3, // ⬅️ تنسيق أرقام JD
+  buildScript,
+  fmt3,
   type Lang,
   type FormatMode,
   type ProrataOutput,
 } from "@/lib/proRata";
 import { useAppStore } from "@/lib/store";
 
-/** Small metric pill used in the summary grid */
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-[#FFF6EF] p-4 shadow-inner">
@@ -30,12 +29,6 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * ProRataCalculator
- * - Computes pro-rata from Activation → first anchor (day 15).
- * - Shows 3 views: Script, Totals, VAT.
- * - Bilingual based on global store locale (ar/en).
- */
 export default function ProRataCalculator() {
   const { locale } = useAppStore();
   const lang = (locale === "ar" ? "ar" : "en") as Lang;
@@ -43,34 +36,26 @@ export default function ProRataCalculator() {
   const [monthlyRaw, setMonthlyRaw] = useState("");
   const [dateRaw, setDateRaw] = useState("");
   const [view, setView] = useState<FormatMode>("script");
+  const [copied, setCopied] = useState(false);
 
-  // Orange bills on a fixed anchor day = 15
   const anchorDay = 15;
 
-  // Parse monthly value (accepts up to 3 decimals)
   const monthly = useMemo(() => {
-    const n = Number(monthlyRaw);
+    const n = Number(monthlyRaw.replace(",", ".").replace(/[^\d.]/g, ""));
     return Number.isFinite(n) && n > 0 ? n : 0;
   }, [monthlyRaw]);
 
-  // Parse activation date (YYYY-MM-DD) → UTC midnight
   const activation = useMemo(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) return null;
     const [y, m, d] = dateRaw.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1, d));
   }, [dateRaw]);
 
-  /**
-   * Core proration:
-   * - We want remaining days in the cycle that contains the activation date,
-   *   where cycle end = first 15th *after* activation.
-   */
   const result = useMemo(() => {
     if (!activation || monthly <= 0) return null;
     return prorate(monthly, activation, anchorDay, "remaining");
   }, [activation, monthly]);
 
-  // Coverage end: the next 15th after the invoice date (advance billing coverage)
   const coverageUntil = useMemo(() => {
     if (!result) return null;
     return addMonthsUTC(result.end, 1, anchorDay);
@@ -78,11 +63,6 @@ export default function ProRataCalculator() {
 
   const percent = result ? (result.ratio * 100).toFixed(2) : "0.00";
 
-  /**
-   * Text block (Script / Totals / VAT):
-   * - في وضع "script" نستخدم buildScript لإظهار فقرة واحدة جاهزة.
-   * - في باقي الأوضاع نستعمل formatProrataOutput (قد تُرجع أسطر متعددة).
-   */
   const textBlock = useMemo(() => {
     if (!result || !activation) return "";
 
@@ -117,7 +97,17 @@ export default function ProRataCalculator() {
     });
   }, [activation, result, lang, view, monthly]);
 
-  // UI strings (bilingual)
+  const handleCopy = async () => {
+    try {
+      // ننسخ النص كما هو (يحافظ على سطور VAT/Totals)
+      await navigator.clipboard.writeText(textBlock);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // لا شيء: في بيئات قديمة قد يفشل النسخ
+    }
+  };
+
   const L = {
     title: lang === "ar" ? "حاسبة التقسيم النسبي" : "Pro-Rata Calculator",
     tip:
@@ -147,6 +137,9 @@ export default function ProRataCalculator() {
       lang === "ar"
         ? "سيظهر هنا السكربت أو الإجمالي أو الضريبة بعد إدخال البيانات."
         : "Script / totals / VAT text will appear here once you enter data.",
+    copy: lang === "ar" ? "نسخ" : "Copy",
+    copied: lang === "ar" ? "تم النسخ" : "Copied",
+    inputs: lang === "ar" ? "بيانات الإدخال" : "Inputs",
   };
 
   return (
@@ -169,7 +162,7 @@ export default function ProRataCalculator() {
       <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
         {/* Summary / meters */}
         <div className="order-2 flex flex-col gap-6 rounded-[2.5rem] border border-white/70 bg-white/80 p-8 shadow-[0_30px_90px_-50px_rgba(255,120,50,0.75)] lg:order-1">
-          {/* Top row: percentage + view switch */}
+          {/* Top row: percentage + view switch + copy */}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="flex h-14 w-14 items-center justify-center rounded-[1.75rem] bg-gradient-to-br from-[#FF9A3D] via-[#FF7A3D] to-[#FF5E3D] text-white shadow-[0_24px_60px_-36px_rgba(255,122,0,0.85)]">
@@ -184,16 +177,36 @@ export default function ProRataCalculator() {
             </div>
 
             <div className="flex items-center gap-2 text-sm">
-              <span>{L.viewLbl}:</span>
+              <span className="whitespace-nowrap">{L.viewLbl}:</span>
               <select
                 value={view}
                 onChange={(e) => setView(e.target.value as FormatMode)}
-                className="rounded-full border px-3 py-1.5"
+                className="rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-foreground shadow-inner focus:outline-none focus:ring-2 focus:ring-[#FF8A4C]/40"
               >
                 <option value="script">{L.mScript}</option>
                 <option value="totals">{L.mTotals}</option>
                 <option value="vat">{L.mVat}</option>
               </select>
+
+              {/* Copy button (small) */}
+              <button
+                type="button"
+                onClick={handleCopy}
+                title={L.copy}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-inner hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#FF8A4C]/40"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5" />
+                    <span className="whitespace-nowrap">{L.copied}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    <span className="whitespace-nowrap">{L.copy}</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
@@ -225,7 +238,6 @@ export default function ProRataCalculator() {
                 transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
                 className="grid gap-4 text-sm sm:grid-cols-2"
               >
-                {/* Pro-rata period = Activation → first 15 */}
                 <Metric
                   label={L.period}
                   value={`${ymd(activation)} → ${ymd(result.end)}`}
@@ -236,12 +248,9 @@ export default function ProRataCalculator() {
                 />
                 <Metric
                   label={L.proAmount}
-                  value={`JD ${result.value.toFixed(3)}`}
+                  value={`JD ${fmt3(result.value)}`}
                 />
-                <Metric
-                  label={L.monthlyLbl}
-                  value={`JD ${monthly.toFixed(3)}`}
-                />
+                <Metric label={L.monthlyLbl} value={`JD ${fmt3(monthly)}`} />
                 <Metric label={L.nextInv} value={ymd(result.end)} />
                 {coverageUntil && (
                   <Metric label={L.coverage} value={ymd(coverageUntil)} />
@@ -266,7 +275,7 @@ export default function ProRataCalculator() {
         <Card className="order-1 border-white/70 bg-white/85 p-2 shadow-[0_34px_100px_-58px_rgba(255,120,50,0.78)] lg:order-2">
           <CardHeader className="pb-2 text-right">
             <CardTitle className="text-lg font-semibold text-foreground">
-              {lang === "ar" ? "بيانات الإدخال" : "Inputs"}
+              {L.inputs}
             </CardTitle>
             <p className="text-sm text-muted-foreground">{L.tip}</p>
           </CardHeader>
@@ -320,8 +329,37 @@ export default function ProRataCalculator() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -14 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="rounded-[2.5rem] border border-white/60 bg-white/80 p-8 text-right text-base leading-loose text-foreground shadow-[0_28px_90px_-56px_rgba(255,120,50,0.7)]"
+            className="rounded-[2.5rem] border border-white/60 bg-white/80 p-6 text-right text-base leading-loose text-foreground shadow-[0_28px_90px_-56px_rgba(255,120,50,0.7)]"
           >
+            {/* Toolbar: view + copy (كبير) */}
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="whitespace-nowrap">{L.viewLbl}:</span>
+                <select
+                  value={view}
+                  onChange={(e) => setView(e.target.value as FormatMode)}
+                  className="rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-foreground shadow-inner focus:outline-none focus:ring-2 focus:ring-[#FF8A4C]/40"
+                >
+                  <option value="script">{L.mScript}</option>
+                  <option value="totals">{L.mTotals}</option>
+                  <option value="vat">{L.mVat}</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex items-center gap-2 rounded-[1.5rem] bg-gradient-to-r from-[#FF9A3D] via-[#FF7A3D] to-[#FF5E3D] px-4 py-2 text-sm font-semibold text-white shadow-[0_12px_34px_-18px_rgba(255,120,60,0.75)] hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-[#FF8A4C]/50"
+              >
+                {copied ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                <span>{copied ? L.copied : L.copy}</span>
+              </button>
+            </div>
+
             {/* مهم: لا نستخدم <pre> حتى لا يفرض سطور جديدة */}
             <div
               dir={lang === "ar" ? "rtl" : "ltr"}

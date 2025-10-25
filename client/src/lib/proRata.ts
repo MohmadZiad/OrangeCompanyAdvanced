@@ -14,7 +14,7 @@ export type FormatMode = "script" | "totals" | "vat";
 
 export interface Cycle {
   start: Date; // inclusive UTC midnight
-  end: Date; // exclusive UTC midnight
+  end: Date;   // exclusive UTC midnight
   days: number;
 }
 
@@ -50,14 +50,14 @@ export interface ProrataOutput {
   vatRate: number;
 
   cycleStartUTC: Date;
-  cycleEndUTC: Date; // first anchor after activation
+  cycleEndUTC: Date;    // first anchor after activation
   nextCycleEndUTC: Date;
 
-  pctText: string; // "46.67%"
-  prorataNetText: string; // "JD 7.000"
-  monthlyNetText: string; // "JD 15.000"
-  cycleRangeText: string; // "2025-09-15 → 2025-10-15"
-  proDaysText: string; // "14 / 30"
+  pctText: string;         // "46.67%"
+  prorataNetText: string;  // "JD 7.000"
+  monthlyNetText: string;  // "JD 15.000"
+  cycleRangeText: string;  // "2025-09-15 → 2025-10-15"
+  proDaysText: string;     // "14 / 30"
 
   fullInvoiceGross?: number; // echo for mode=gross
 }
@@ -99,9 +99,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const LRM = "\u200E"; // Left-to-Right Mark to stabilise punctuation in RTL around numbers
 
 export function toUtcMidnight(d: Date): Date {
-  return new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-  );
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
 export function utcDate(y: number, mZeroBased: number, d: number): Date {
@@ -117,11 +115,7 @@ export function clampDay(y: number, mZeroBased: number, day: number): number {
   return Math.max(1, Math.min(day, last));
 }
 
-export function addMonthsUTC(
-  base: Date,
-  months: number,
-  keepDay?: number
-): Date {
+export function addMonthsUTC(base: Date, months: number, keepDay?: number): Date {
   const y = base.getUTCFullYear();
   const m = base.getUTCMonth();
   const d = keepDay ?? base.getUTCDate();
@@ -156,11 +150,7 @@ export function daysBetween(a: Date, b: Date): number {
 /* =========================
  * Anchor helpers & cycles
  * =======================*/
-export function monthAnchorUTC(
-  y: number,
-  mZeroBased: number,
-  anchorDay = 15
-): Date {
+export function monthAnchorUTC(y: number, mZeroBased: number, anchorDay = 15): Date {
   return utcDate(y, mZeroBased, clampDay(y, mZeroBased, anchorDay));
 }
 
@@ -194,7 +184,7 @@ export function prorate(
   monthly: number,
   pivot: Date,
   anchorDay = 15,
-  mode: ProrationMode = "remaining"
+  mode: ProrationMode = "remaining",
 ): ProrationResult {
   if (!Number.isFinite(monthly) || monthly <= 0) {
     throw new Error("monthly must be a positive number");
@@ -229,11 +219,7 @@ export function cycleFromAnchor(end: Date, anchorDay = 15): Cycle {
   return { start: prev, end: E, days: Math.max(0, daysBetween(prev, E)) };
 }
 
-export function computeActivationProrata(
-  monthly: number,
-  activation: Date,
-  anchorDay = 15
-) {
+export function computeActivationProrata(monthly: number, activation: Date, anchorDay = 15) {
   if (!Number.isFinite(monthly) || monthly <= 0) {
     throw new Error("monthly must be a positive number");
   }
@@ -262,14 +248,7 @@ export function formatProrataOutput(
   lang: Lang,
   mode: FormatMode,
   monthly: number,
-  result: {
-    usedDays: number;
-    days: number;
-    ratio: number;
-    value: number;
-    start: Date;
-    end: Date;
-  }
+  result: { usedDays: number; days: number; ratio: number; value: number; start: Date; end: Date },
 ): string {
   const L = STR[lang];
   const startText = dmy(result.start);
@@ -322,16 +301,11 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
 
   // Monthly net amount (if user provided gross, convert to net)
   const monthlyNet =
-    input.mode === "gross"
-      ? input.fullInvoiceGross / (1 + vatRate)
-      : input.monthlyNet;
+    input.mode === "gross" ? input.fullInvoiceGross / (1 + vatRate) : input.monthlyNet;
 
   // Proper anchor math (not fixed 15 days)
   const cyc = anchorCycle(activation, anchorDay);
-  const proDays = Math.max(
-    0,
-    Math.min(cyc.days, daysBetween(activation, cyc.end))
-  );
+  const proDays = Math.max(0, Math.min(cyc.days, daysBetween(activation, cyc.end)));
   const ratio = cyc.days === 0 ? 0 : proDays / cyc.days;
   const prorataNet = monthlyNet * ratio;
 
@@ -352,9 +326,7 @@ export function computeProrata(input: ProrataInput): ProrataOutput {
     monthlyNetText: jd3(monthlyNet),
     cycleRangeText: `${ymd(cyc.start)} \u2192 ${ymd(cyc.end)}`,
     proDaysText: `${proDays} / ${cyc.days}`,
-    ...(input.mode === "gross"
-      ? { fullInvoiceGross: input.fullInvoiceGross }
-      : {}),
+    ...(input.mode === "gross" ? { fullInvoiceGross: input.fullInvoiceGross } : {}),
   };
 }
 
@@ -392,11 +364,11 @@ export function __exampleA() {
   const monthly = 30;
   const proAmount = monthly * ratio;
   return {
-    firstAnchor: ymd(fa), // "2025-10-15"
+    firstAnchor: ymd(fa),       // "2025-10-15"
     cycleStart: ymd(cyc.start), // "2025-09-15"
-    cycleEnd: ymd(cyc.end), // "2025-10-15"
-    days: cyc.days, // 30
-    proDays, // 1
+    cycleEnd: ymd(cyc.end),     // "2025-10-15"
+    days: cyc.days,             // 30
+    proDays,                    // 1
     proAmount: fmt3(proAmount), // "1.000"
     totalNoVat: fmt3(monthly + proAmount), // "31.000"
   };
