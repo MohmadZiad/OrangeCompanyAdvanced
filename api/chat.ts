@@ -6,10 +6,10 @@ import {
   type DocEntry,
 } from "../shared/schema";
 import { extractAndStoreDocs, readDocs, slugifyTitle } from "../server/docs";
-// ملاحظة: يفضّل نقل هذا الملف إلى server/ أو shared/ لاحقًا
+// يفضل لاحقًا نقل proRata إلى shared/proRata واستيراده من هناك
 import { buildScript, computeProrata, ymd } from "../client/src/lib/proRata";
 
-// --- نفس المتغيرات والدوال المساعدة عندك ---
+// ===== معدل الطلبات (Rate limit) =====
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 10;
@@ -26,6 +26,7 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
+// ===== مساعدات =====
 const ARABIC_DIGIT_MAP: Record<string, string> = {
   "٠": "0",
   "١": "1",
@@ -131,6 +132,7 @@ function parseProrataIntent(message: string): ProrataIntent | null {
 
 const VAT_KEYWORDS =
   /(?:ضريبة|شامل|vat|ضريبه|tax|مع الضريبة|includes vat|include vat|with vat)/i;
+
 function parseVatIntent(message: string): VatIntent | null {
   const normalized = normalizeDigits(message);
   if (!VAT_KEYWORDS.test(normalized)) return null;
@@ -196,7 +198,7 @@ function buildAssistantMessage({
   };
 }
 
-// بدون @vercel/node
+// ====== Handler ======
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
@@ -258,6 +260,7 @@ export default async function handler(req: any, res: any) {
         : docsBefore;
     const docUpdateNote = buildDocsUpdateNote(docUpdate, detectedLocale);
 
+    // ===== ردود فورية (JSON) =====
     if (latestUserMessage) {
       const prorataIntent = parseProrataIntent(latestUserMessage.content);
       if (prorataIntent) {
@@ -387,7 +390,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // --- SSE streaming ---
+    // ===== SSE (Streaming) =====
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -399,44 +402,49 @@ export default async function handler(req: any, res: any) {
       } catch {}
     }, 25_000);
 
-    const sanitized: ChatMessage[] = messages.map((m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-      timestamp: m.timestamp,
-    }));
-    const composed = [
-      { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "system",
-        content: `Docs available: ${(await readDocs())
-          .map((d) => `${d.title} (${d.url || "pending"})`)
-          .join(" | ")}`,
-      },
-      ...sanitized.map((m) => ({
-        role: m.role as "user" | "assistant",
+    try {
+      const sanitized: ChatMessage[] = messages.map((m) => ({
+        id: m.id,
+        role: m.role,
         content: m.content,
-      })),
-    ] as { role: "system" | "user" | "assistant"; content: string }[];
+        timestamp: m.timestamp,
+      }));
 
-    const stream = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: composed,
-      max_tokens: 1024,
-      stream: true,
-    });
+      const composed = [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: `Docs available: ${(await readDocs())
+            .map((d) => `${d.title} (${d.url || "pending"})`)
+            .join(" | ")}`,
+        },
+        ...sanitized.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      ] as { role: "system" | "user" | "assistant"; content: string }[];
 
-    const prelude = docUpdateNote ? `${docUpdateNote}\n` : "";
-    if (prelude) res.write(`data: ${JSON.stringify({ content: prelude })}\n\n`);
+      const stream = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: composed,
+        max_tokens: 1024,
+        stream: true,
+      });
 
-    for await (const chunk of stream) {
-      const content = chunk.choices?.[0]?.delta?.content || "";
-      if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      const prelude = docUpdateNote ? `${docUpdateNote}\n` : "";
+      if (prelude)
+        res.write(`data: ${JSON.stringify({ content: prelude })}\n\n`);
+
+      for await (const chunk of stream) {
+        const content = chunk.choices?.[0]?.delta?.content || "";
+        if (content) res.write(`data: ${JSON.stringify({ content })}\n\n`);
+      }
+
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } finally {
+      clearInterval(keepAlive);
     }
-
-    clearInterval(keepAlive);
-    res.write("data: [DONE]\n\n");
-    res.end();
   } catch (e: any) {
     if (!res.headersSent) {
       res.statusCode = typeof e?.status === "number" ? e.status : 500;
