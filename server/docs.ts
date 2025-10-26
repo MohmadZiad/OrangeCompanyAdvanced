@@ -7,7 +7,6 @@
 
 import { promises as fs } from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 
 import { docEntrySchema, type DocEntry } from "@shared/schema";
 
@@ -64,10 +63,7 @@ const ARABIC_TO_ASCII: Record<string, string> = {
   "٩": "9",
 };
 
-const DOCS_FILE = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../shared/docs.json"
-);
+const DOCS_FILE = path.join(process.cwd(), "shared", "docs.json");
 
 const DOCS_SEED_TITLES: string[] = [
   "عروض حماية الوطن",
@@ -134,10 +130,16 @@ export function slugifyTitle(rawTitle: string): string {
   return joined || slugFallback(rawTitle);
 }
 
+const isReadOnlyEnvironment = () =>
+  Boolean(process.env.VERCEL) || process.env.NODE_ENV === "production";
+
 async function ensureDocsFile(): Promise<void> {
   try {
     await fs.access(DOCS_FILE);
   } catch {
+    if (isReadOnlyEnvironment()) {
+      return;
+    }
     const seed = DOCS_SEED_TITLES.map((title) => ({
       id: slugifyTitle(title),
       title: normalizeWhitespace(title),
@@ -151,13 +153,26 @@ async function ensureDocsFile(): Promise<void> {
 
 export async function readDocs(): Promise<DocEntry[]> {
   await ensureDocsFile();
-  const raw = await fs.readFile(DOCS_FILE, "utf-8");
-  const parsed = JSON.parse(raw);
-  const docs = docEntrySchema.array().parse(parsed);
-  return docs;
+  try {
+    const raw = await fs.readFile(DOCS_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    const docs = docEntrySchema.array().parse(parsed);
+    return docs;
+  } catch (error) {
+    if (
+      isReadOnlyEnvironment() &&
+      (error as NodeJS.ErrnoException)?.code === "ENOENT"
+    ) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 async function writeDocs(entries: DocEntry[]): Promise<void> {
+  if (isReadOnlyEnvironment()) {
+    return;
+  }
   const sorted = [...entries].sort((a, b) =>
     a.title.localeCompare(b.title, "ar")
   );
@@ -214,6 +229,10 @@ export async function upsertDocsFromTitles(
   titles: string[]
 ): Promise<{ added: DocEntry[]; updated: DocEntry[] }> {
   if (!titles.length) {
+    return { added: [], updated: [] };
+  }
+
+  if (isReadOnlyEnvironment()) {
     return { added: [], updated: [] };
   }
 
