@@ -1,10 +1,17 @@
 import { create } from "zustand";
-import type { Theme, Locale, ChatMessage, CalculatorResults } from "@shared/schema";
+import type {
+  AppTheme,
+  Locale,
+  ChatMessage,
+  CalculatorResults,
+} from "@shared/schema";
 import type { ProrataOutput } from "@/lib/proRata";
 
+type ThemeOption = AppTheme | "neon" | "sunset";
+
 interface AppState {
-  theme: Theme | "neon" | "sunset";
-  setTheme: (theme: Theme | "neon" | "sunset") => void;
+  theme: ThemeOption;
+  setTheme: (theme: ThemeOption) => void;
   locale: Locale;
   setLocale: (locale: Locale) => void;
   chatMessages: ChatMessage[];
@@ -29,6 +36,7 @@ const loadFromStorage = <T>(key: string, def: T): T => {
     return def;
   }
 };
+
 const saveToStorage = <T>(key: string, v: T) => {
   if (typeof window === "undefined") return;
   try {
@@ -40,16 +48,15 @@ const STORAGE_KEY = "orange-tools-storage";
 
 export const useAppStore = create<AppState>((set, get) => {
   const stored = loadFromStorage(STORAGE_KEY, {
-    theme: "orange" as Theme,
-    locale: (
-      typeof navigator !== "undefined" && navigator.language.startsWith("ar")
-        ? "ar"
-        : "en"
-    ) as Locale,
+    theme: "orange" as ThemeOption,
+    locale: (typeof navigator !== "undefined" &&
+    navigator.language.startsWith("ar")
+      ? "ar"
+      : "en") as Locale,
     chatMessages: [] as ChatMessage[],
   });
 
-  const syncDocumentTheme = (theme: Theme | "neon" | "sunset") => {
+  const syncDocumentTheme = (theme: ThemeOption) => {
     if (typeof document === "undefined") return;
     document.documentElement.classList.remove(
       "dark",
@@ -60,20 +67,16 @@ export const useAppStore = create<AppState>((set, get) => {
       "sunset"
     );
     if (theme === "dark") document.documentElement.classList.add("dark");
-    else document.documentElement.classList.add(theme as string);
+    else document.documentElement.classList.add(theme);
   };
 
   const persist = () => {
     const { theme, locale, chatMessages } = get();
-    saveToStorage(STORAGE_KEY, {
-      theme: (theme as Theme | "neon" | "sunset") ?? "orange",
-      locale,
-      chatMessages,
-    });
+    saveToStorage(STORAGE_KEY, { theme, locale, chatMessages });
   };
 
   return {
-    theme: stored.theme as Theme | "neon" | "sunset",
+    theme: stored.theme,
     setTheme: (theme) => {
       set({ theme });
       syncDocumentTheme(theme);

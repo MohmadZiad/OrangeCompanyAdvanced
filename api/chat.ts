@@ -6,9 +6,10 @@ import {
   type DocEntry,
 } from "../shared/schema";
 import { extractAndStoreDocs, readDocs, slugifyTitle } from "../server/docs";
+// ملاحظة: يفضّل نقل هذا الملف إلى server/ أو shared/ لاحقًا
 import { buildScript, computeProrata, ymd } from "../client/src/lib/proRata";
 
-// --- نفس المتغيرات والدوال المساعدة عندك (بدون تغيير) ---
+// --- نفس المتغيرات والدوال المساعدة عندك ---
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 10;
@@ -195,11 +196,14 @@ function buildAssistantMessage({
   };
 }
 
-// 👇 بدون @vercel/node: استخدم any لتوقيع الطلب/الاستجابة
+// بدون @vercel/node
 export default async function handler(req: any, res: any) {
   try {
-    if (req.method !== "POST")
-      return res.status(405).json({ error: "Method not allowed" });
+    if (req.method !== "POST") {
+      res.statusCode = 405;
+      res.setHeader("Content-Type", "application/json");
+      return res.end(JSON.stringify({ error: "Method not allowed" }));
+    }
 
     const clientIp =
       (typeof req.headers["x-forwarded-for"] === "string"
@@ -211,20 +215,24 @@ export default async function handler(req: any, res: any) {
       "unknown";
 
     if (!checkRateLimit(clientIp)) {
-      return res
-        .status(429)
-        .json({ error: "Too many requests. Please try again later." });
+      res.statusCode = 429;
+      res.setHeader("Content-Type", "application/json");
+      return res.end(
+        JSON.stringify({ error: "Too many requests. Please try again later." })
+      );
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const parsed = chatRequestSchema.safeParse(body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      return res.end(
+        JSON.stringify({
           error: "Invalid request format",
           details: parsed.error.errors,
-        });
+        })
+      );
     }
 
     const { messages, locale: requestedLocale } = parsed.data;
@@ -297,7 +305,9 @@ export default async function handler(req: any, res: any) {
             },
           },
         });
-        return res.status(200).json({ message });
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        return res.end(JSON.stringify({ message }));
       }
 
       const vatIntent = parseVatIntent(latestUserMessage.content);
@@ -325,7 +335,9 @@ export default async function handler(req: any, res: any) {
           locale: detectedLocale,
           content: combineText(detectedLocale, docUpdateNote, { ar, en }),
         });
-        return res.status(200).json({ message });
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        return res.end(JSON.stringify({ message }));
       }
 
       const docIntent = detectDocNavigation(latestUserMessage.content, docs);
@@ -347,7 +359,9 @@ export default async function handler(req: any, res: any) {
             note: docUpdateNote || undefined,
           },
         });
-        return res.status(200).json({ message });
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        return res.end(JSON.stringify({ message }));
       }
 
       if (docUpdateNote) {
@@ -366,14 +380,17 @@ export default async function handler(req: any, res: any) {
               updated: docUpdate.updated,
             },
           });
-          return res.status(200).json({ message });
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify({ message }));
         }
       }
     }
 
-    // SSE streaming
+    // --- SSE streaming ---
+    res.statusCode = 200;
     res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
 
     const keepAlive = setInterval(() => {
@@ -409,7 +426,6 @@ export default async function handler(req: any, res: any) {
       stream: true,
     });
 
-    // optional prelude
     const prelude = docUpdateNote ? `${docUpdateNote}\n` : "";
     if (prelude) res.write(`data: ${JSON.stringify({ content: prelude })}\n\n`);
 
@@ -422,10 +438,11 @@ export default async function handler(req: any, res: any) {
     res.write("data: [DONE]\n\n");
     res.end();
   } catch (e: any) {
-    if (!res.headersSent)
-      return res
-        .status(typeof e?.status === "number" ? e.status : 500)
-        .json({ error: e?.message || "chat error" });
+    if (!res.headersSent) {
+      res.statusCode = typeof e?.status === "number" ? e.status : 500;
+      res.setHeader("Content-Type", "application/json");
+      return res.end(JSON.stringify({ error: e?.message || "chat error" }));
+    }
     try {
       res.write(
         `data: ${JSON.stringify({ error: e?.message || "chat error" })}\n\n`

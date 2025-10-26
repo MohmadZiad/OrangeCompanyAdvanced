@@ -1,6 +1,6 @@
 import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
-import type { Theme } from "@shared/schema";
+import type { AppTheme } from "@shared/schema";
 import { Palette } from "lucide-react";
 import {
   DropdownMenu,
@@ -10,9 +10,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { t } from "@/lib/i18n";
 
+type ThemeOption = AppTheme | "neon" | "sunset";
+
 export function ThemeToggle() {
   const { theme, setTheme, locale } = useAppStore();
-  const themes: { value: Theme | "neon" | "sunset"; label: string }[] = [
+
+  const themes: { value: ThemeOption; label: string }[] = [
     { value: "orange", label: t("themeOrange", locale) },
     { value: "dark", label: t("themeDark", locale) },
     { value: "blossom", label: t("themeBlossom", locale) },
