@@ -1,57 +1,62 @@
 // server/docs.ts
 // -----------------------------------------------------------------------------
-// Helper utilities to manage the shared docs.json file. The file is kept under
-// the repository's ./shared/ directory so both the server and client can rely on
-// the same source of truth.
+// Robust docs loader: Read-only on Vercel (production), FS + seeding in dev.
 // -----------------------------------------------------------------------------
 
-import { promises as fs } from "fs";
+import fs from "fs";
+import { promises as fsp } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-
 import { docEntrySchema, type DocEntry } from "@shared/schema";
 
-// Arabic to ASCII transliteration map. This keeps slug generation stable even
-// if titles are updated frequently.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const isProd =
+  process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+
+// -----------------------------------------------------------------------------
+// Slug helpers (كما هي)
+// -----------------------------------------------------------------------------
 const ARABIC_TO_ASCII: Record<string, string> = {
-  "أ": "a",
-  "إ": "i",
-  "آ": "a",
-  "ا": "a",
-  "ب": "b",
-  "ت": "t",
-  "ث": "th",
-  "ج": "j",
-  "ح": "h",
-  "خ": "kh",
-  "د": "d",
-  "ذ": "dh",
-  "ر": "r",
-  "ز": "z",
-  "س": "s",
-  "ش": "sh",
-  "ص": "s",
-  "ض": "d",
-  "ط": "t",
-  "ظ": "z",
-  "ع": "a",
-  "غ": "gh",
-  "ف": "f",
-  "ق": "q",
-  "ك": "k",
-  "ل": "l",
-  "م": "m",
-  "ن": "n",
-  "ه": "h",
-  "و": "w",
-  "ي": "y",
-  "ء": "a",
-  "ئ": "y",
-  "ؤ": "w",
-  "ة": "h",
-  "ى": "a",
-  "لا": "la",
-  "ﻻ": "la",
+  أ: "a",
+  إ: "i",
+  آ: "a",
+  ا: "a",
+  ب: "b",
+  ت: "t",
+  ث: "th",
+  ج: "j",
+  ح: "h",
+  خ: "kh",
+  د: "d",
+  ذ: "dh",
+  ر: "r",
+  ز: "z",
+  س: "s",
+  ش: "sh",
+  ص: "s",
+  ض: "d",
+  ط: "t",
+  ظ: "z",
+  ع: "a",
+  غ: "gh",
+  ف: "f",
+  ق: "q",
+  ك: "k",
+  ل: "l",
+  م: "m",
+  ن: "n",
+  ه: "h",
+  و: "w",
+  ي: "y",
+  ء: "a",
+  ئ: "y",
+  ؤ: "w",
+  ة: "h",
+  ى: "a",
+  لا: "la",
+  ﻻ: "la",
   "٠": "0",
   "١": "1",
   "٢": "2",
@@ -64,11 +69,57 @@ const ARABIC_TO_ASCII: Record<string, string> = {
   "٩": "9",
 };
 
-const DOCS_FILE = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../shared/docs.json"
-);
+const slugFallback = (title: string) =>
+  `doc-${Buffer.from(title).toString("base64url").slice(0, 8)}`;
 
+const normalizeWhitespace = (input: string) =>
+  input
+    .replace(/[\u064B-\u065F]/g, "")
+    .replace(/[\s\u200f\u200e]+/g, " ")
+    .trim();
+
+export function slugifyTitle(rawTitle: string): string {
+  const title = normalizeWhitespace(rawTitle)
+    .replace(/[_~`^،؟!?,.;:\-]+/g, " ")
+    .toLowerCase();
+
+  if (!title) return slugFallback(rawTitle);
+
+  const parts: string[] = [];
+  for (let i = 0; i < title.length; i += 1) {
+    const ch = title[i];
+    const pair = title.slice(i, i + 2);
+    if (ARABIC_TO_ASCII[pair]) {
+      parts.push(ARABIC_TO_ASCII[pair]);
+      i += 1;
+      continue;
+    }
+    if (ARABIC_TO_ASCII[ch]) {
+      parts.push(ARABIC_TO_ASCII[ch]);
+      continue;
+    }
+    if (/^[a-z0-9]$/i.test(ch)) {
+      parts.push(ch.toLowerCase());
+      continue;
+    }
+    if (/\s/.test(ch)) parts.push("-");
+  }
+  const joined = parts.join("").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return joined || slugFallback(rawTitle);
+}
+
+// -----------------------------------------------------------------------------
+// مسارات محتملة للقراءة من FS (dev)
+// -----------------------------------------------------------------------------
+const DOCS_FILE_CANDIDATES = [
+  path.join(process.cwd(), "shared", "docs.json"),
+  path.join(process.cwd(), "dist", "shared", "docs.json"),
+  path.join(__dirname, "..", "shared", "docs.json"),
+  path.join(__dirname, "..", "..", "shared", "docs.json"),
+  path.resolve("shared/docs.json"),
+];
+
+// seeding titles (dev only)
 const DOCS_SEED_TITLES: string[] = [
   "عروض حماية الوطن",
   "نت وين مكان عروض 4",
@@ -90,80 +141,83 @@ const DOCS_SEED_TITLES: string[] = [
   "KARTI",
 ];
 
-const slugFallback = (title: string) =>
-  `doc-${Buffer.from(title).toString("base64url").slice(0, 8)}`;
-
-const normalizeWhitespace = (input: string) =>
-  input
-    .replace(/[\u064B-\u065F]/g, "")
-    .replace(/[\s\u200f\u200e]+/g, " ")
-    .trim();
-
-export function slugifyTitle(rawTitle: string): string {
-  const title = normalizeWhitespace(rawTitle)
-    .replace(/[_~`^،؟!?,.;:\-]+/g, " ")
-    .toLowerCase();
-
-  if (!title) {
-    return slugFallback(rawTitle);
+// ابحث عن أول ملف docs.json موجود (dev)
+function findExistingDocsFile(): string | null {
+  for (const p of DOCS_FILE_CANDIDATES) {
+    if (fs.existsSync(p)) return p;
   }
-
-  const parts: string[] = [];
-  for (let i = 0; i < title.length; i += 1) {
-    const char = title[i];
-    const nextPair = title.slice(i, i + 2);
-    if (ARABIC_TO_ASCII[nextPair]) {
-      parts.push(ARABIC_TO_ASCII[nextPair]);
-      i += 1;
-      continue;
-    }
-    if (ARABIC_TO_ASCII[char]) {
-      parts.push(ARABIC_TO_ASCII[char]);
-      continue;
-    }
-    if (/^[a-z0-9]$/i.test(char)) {
-      parts.push(char.toLowerCase());
-      continue;
-    }
-    if (/\s/.test(char)) {
-      parts.push("-");
-    }
-  }
-
-  const joined = parts.join("").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return joined || slugFallback(rawTitle);
+  return null;
 }
 
-async function ensureDocsFile(): Promise<void> {
-  try {
-    await fs.access(DOCS_FILE);
-  } catch {
-    const seed = DOCS_SEED_TITLES.map((title) => ({
-      id: slugifyTitle(title),
-      title: normalizeWhitespace(title),
-      url: "",
-      tags: [/^[\p{Script=Arabic}]+/u.test(title) ? "ar" : "en"],
-    }));
-    await fs.mkdir(path.dirname(DOCS_FILE), { recursive: true });
-    await fs.writeFile(DOCS_FILE, JSON.stringify(seed, null, 2), "utf-8");
-  }
+async function ensureDocsFileDev(): Promise<string> {
+  let file = findExistingDocsFile();
+  if (file) return file;
+
+  // أنشئ shared/docs.json في المشروع المحلي
+  const target = path.join(process.cwd(), "shared", "docs.json");
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+
+  const seed: DocEntry[] = DOCS_SEED_TITLES.map((title) => ({
+    id: slugifyTitle(title),
+    title: normalizeWhitespace(title),
+    url: "",
+    tags: [/^[\p{Script=Arabic}]+/u.test(title) ? "ar" : "en"],
+  }));
+
+  await fsp.writeFile(target, JSON.stringify(seed, null, 2), "utf-8");
+  return target;
 }
 
+// -----------------------------------------------------------------------------
+// القراءة
+// -----------------------------------------------------------------------------
 export async function readDocs(): Promise<DocEntry[]> {
-  await ensureDocsFile();
-  const raw = await fs.readFile(DOCS_FILE, "utf-8");
-  const parsed = JSON.parse(raw);
-  const docs = docEntrySchema.array().parse(parsed);
+  if (isProd) {
+    // قراءة read-only بالـ import (الأكثر أمانًا على Vercel)
+    try {
+      // محاولة import مع/بدون assertion (لتوافق الباندلر)
+      const mod: any =
+        (await import("../shared/docs.json", {
+          assert: { type: "json" },
+        } as any)) || (await import("../shared/docs.json"));
+
+      const data = mod?.default ?? mod;
+      const docs = docEntrySchema.array().parse(data);
+      return docs;
+    } catch {
+      // لو فشل الـ import لأي سبب، جرّب FS fallback (قراءة فقط)
+      for (const p of DOCS_FILE_CANDIDATES) {
+        try {
+          const raw = await fsp.readFile(p, "utf-8");
+          const docs = docEntrySchema.array().parse(JSON.parse(raw));
+          return docs;
+        } catch {}
+      }
+      return []; // آخر علاج: رجّع فاضي بدل ما تكسر /api/docs
+    }
+  }
+
+  // dev: read + seed + writable
+  const file = await ensureDocsFileDev();
+  const raw = await fsp.readFile(file, "utf-8");
+  const docs = docEntrySchema.array().parse(JSON.parse(raw));
   return docs;
 }
 
+// -----------------------------------------------------------------------------
+// الكتابة (dev فقط). على Vercel (prod) نرجّع no-op.
+// -----------------------------------------------------------------------------
 async function writeDocs(entries: DocEntry[]): Promise<void> {
-  const sorted = [...entries].sort((a, b) => a.title.localeCompare(b.title, "ar"));
-  await fs.writeFile(DOCS_FILE, JSON.stringify(sorted, null, 2), "utf-8");
+  if (isProd) return; // read-only in production
+  const file = await ensureDocsFileDev();
+  const sorted = [...entries].sort((a, b) =>
+    a.title.localeCompare(b.title, "ar")
+  );
+  await fsp.writeFile(file, JSON.stringify(sorted, null, 2), "utf-8");
 }
 
 function mergeDocs(existing: DocEntry[], incoming: DocEntry[]) {
-  const map = new Map(existing.map((doc) => [doc.id, doc] as const));
+  const map = new Map(existing.map((d) => [d.id, d] as const));
   const added: DocEntry[] = [];
   const updated: DocEntry[] = [];
 
@@ -174,13 +228,11 @@ function mergeDocs(existing: DocEntry[], incoming: DocEntry[]) {
       added.push(doc);
       continue;
     }
-
-    const hasDiff =
+    const changed =
       prev.title !== doc.title ||
       prev.url !== doc.url ||
       JSON.stringify(prev.tags ?? []) !== JSON.stringify(doc.tags ?? []);
-
-    if (hasDiff) {
+    if (changed) {
       const merged: DocEntry = {
         ...prev,
         ...doc,
@@ -191,37 +243,31 @@ function mergeDocs(existing: DocEntry[], incoming: DocEntry[]) {
     }
   }
 
-  return {
-    list: Array.from(map.values()),
-    added,
-    updated,
-  };
+  return { list: Array.from(map.values()), added, updated };
 }
 
 function extractLineCandidates(message: string): string[] {
   const normalized = normalizeWhitespace(message);
   if (!normalized) return [];
-  const candidates = normalized
+  return normalized
     .split(/\n+|•+/)
-    .map((line) => normalizeWhitespace(line))
-    .filter((line) => line.length >= 2 && /[\p{L}0-9]/u.test(line));
-  return candidates;
+    .map((l) => normalizeWhitespace(l))
+    .filter((l) => l.length >= 2 && /[\p{L}0-9]/u.test(l));
 }
 
 export async function upsertDocsFromTitles(
   titles: string[]
 ): Promise<{ added: DocEntry[]; updated: DocEntry[] }> {
-  if (!titles.length) {
-    return { added: [], updated: [] };
-  }
+  if (isProd) return { added: [], updated: [] }; // no-op في الإنتاج
+  if (!titles.length) return { added: [], updated: [] };
 
   const docs = await readDocs();
   const incoming = titles.map((title) => {
-    const slug = slugifyTitle(title);
+    const id = slugifyTitle(title);
     return {
-      id: slug,
+      id,
       title: normalizeWhitespace(title),
-      url: docs.find((doc) => doc.id === slug)?.url ?? "",
+      url: docs.find((d) => d.id === id)?.url ?? "",
       tags: [/^[\p{Script=Arabic}]+/u.test(title) ? "ar" : "en"],
     } satisfies DocEntry;
   });
@@ -234,14 +280,13 @@ export async function upsertDocsFromTitles(
 export async function extractAndStoreDocs(
   message: string
 ): Promise<{ added: DocEntry[]; updated: DocEntry[] }> {
+  if (isProd) return { added: [], updated: [] }; // no-op في الإنتاج
   const candidates = extractLineCandidates(message);
-  if (candidates.length < 3) {
-    return { added: [], updated: [] };
-  }
+  if (candidates.length < 3) return { added: [], updated: [] };
   return upsertDocsFromTitles(candidates);
 }
 
-export async function getDocsFilePath() {
-  await ensureDocsFile();
-  return DOCS_FILE;
+export async function getDocsFilePath(): Promise<string | null> {
+  if (isProd) return null;
+  return ensureDocsFileDev();
 }
